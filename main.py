@@ -1,6 +1,7 @@
 import argparse
 import os
 import struct
+import io
 from dataclasses import dataclass
 
 
@@ -126,8 +127,74 @@ def is_valid_gguf(path: str) -> bool:
         return magic == b"GGUF"
 
 
+GGUF_VERSION = 3
+GGUF_NTYPES = 13
+GGUF_TYPES = "BbHhIif?s_Qqd"
+GGUF_SIZES = [1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8]
+GGUF_Value = int | float | bool | str | list
+
+
+def read_gguf_type(f: io.BufferedReader) -> (str, int):
+    type_id: int = struct.unpack("<I", f.read(4))[0]
+    if type_id >= GGUF_NTYPES:
+        raise TypeError("Unknown metadata type.")
+    value_type = GGUF_TYPES[type_id]
+    value_size = GGUF_SIZES[type_id]
+    return value_type, value_size
+
+
+def read_gguf_string(f: io.BufferedReader) -> str:
+    length: int = struct.unpack("<Q", f.read(8))[0]
+    b: bytes = struct.unpack(f"<{length}s", f.read(length))[0]
+    return b.decode("utf-8")
+
+
+def read_gguf_array(f: io.BufferedReader) -> list[GGUF_Value]:
+    value_type, value_size = read_gguf_type(f)
+    length: int = struct.unpack("<Q", f.read(8))[0]
+    return [read_gguf_value(f, value_type, value_size) for _ in range(length)]
+
+
+def read_gguf_value(
+    f: io.BufferedReader, value_type: str, value_size: int
+) -> GGUF_Value:
+    if value_type == "s":
+        return read_gguf_string(f)
+    if value_type == "_":
+        return read_gguf_array(f)
+    return struct.unpack(f"<{value_type}", f.read(value_size))[0]
+
+
+def read_gguf_kv(f: io.BufferedReader) -> (str, GGUF_Value):
+    key = read_gguf_string(f)
+    value_type, value_size = read_gguf_type(f)
+    value = read_gguf_value(f, value_type, value_size)
+    return key, value
+
+
+def read_gguf_metadata(path: str):
+    with open(path, "rb") as f:
+        [magic, version, tensor_count, metadata_kv_count] = struct.unpack(
+            "<4sIQQ", f.read(24)
+        )
+        if magic != b"GGUF":
+            raise ValueError(f"{path} is not a GGUF file.")
+        if version != GGUF_VERSION:
+            print(
+                f"Detected GGUF version {version}. This script was only tested with version {GGUF_VERSION} and may not work correctly."
+            )
+        metadata = {}
+        for _ in range(metadata_kv_count):
+            key, value = read_gguf_kv(f)
+            metadata[key] = value
+        return metadata
+
+
 def main():
-    print(parse_inputs())
+    inputs = parse_inputs()
+    for file in inputs.files:
+        metadata = read_gguf_metadata(file)
+        print(metadata.keys())
 
 
 if __name__ == "__main__":
