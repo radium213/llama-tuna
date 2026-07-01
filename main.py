@@ -2,6 +2,8 @@ import argparse
 import os
 import struct
 import io
+import subprocess
+import csv
 from dataclasses import dataclass
 
 
@@ -190,11 +192,68 @@ def read_gguf_metadata(path: str):
         return metadata
 
 
+class BenchRunner:
+    def __init__(
+        self,
+        binary: str,
+        model: str,
+        threads: int,
+        flash_attn: str = "on",
+        cache_type_k: str = "f16",
+        cache_type_v: str = "f16",
+        repetitions: int = 3,
+        no_warmup: bool = False,
+    ):
+        self.binary = binary
+        self.options = {}
+        self.options["-m"] = model
+        self.options["-o"] = "csv"
+        self.options["-t"] = str(threads)
+        self.options["-fa"] = flash_attn
+        self.options["-ctk"] = cache_type_k
+        self.options["-ctv"] = cache_type_v
+        self.options["-r"] = str(repetitions)
+        if no_warmup:
+            self.options["--no-warmup"] = ""
+
+    def run_llama_bench(self, **kwargs) -> str | None:
+        extra_options = {f"-{k}": v for k, v in kwargs.items()}
+        options = self.options | extra_options
+        args = [str(e) for item in options.items() for e in item if e != ""]
+        cmd = [self.binary] + args
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return None
+        return result.stdout
+
+    def run_test(self, **kwargs) -> float:
+        result = self.run_llama_bench(**kwargs)
+        if result is None:
+            return 0.0
+        data = csv.DictReader(io.StringIO(result))
+        avg_ts = [float(row["avg_ts"]) for row in data]
+        return sum(avg_ts) / len(avg_ts)
+
+
 def main():
     inputs = parse_inputs()
-    for file in inputs.files:
+    files = sorted(inputs.files, key=os.path.getsize)
+    for file in files:
         metadata = read_gguf_metadata(file)
-        print(metadata.keys())
+        model_type = metadata.get("general.type", "")
+        architecture = metadata.get("general.architecture", "")
+        if model_type != "model":
+            print(f"Skipping {file} - incompatible type: {model_type}")
+            continue
+        if "bert" in architecture or architecture in ["whisper", "clip", "siglip"]:
+            print(f"Skipping {file} - incompatible architecture: {architecture}")
+            continue
+        context_length = metadata[f"{architecture}.context_length"]
+        print(file)
+        ncpu = os.cpu_count() or 1
+        runner = BenchRunner("llama-bench", file, ncpu, no_warmup=True)
+        data = runner.run_test(t=12, p=512, n=0, ngl=0)
+        print(data)
 
 
 if __name__ == "__main__":
