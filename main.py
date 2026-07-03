@@ -6,6 +6,7 @@ import subprocess
 import csv
 from dataclasses import dataclass
 from collections.abc import Callable
+from typing import Any
 
 
 @dataclass
@@ -104,7 +105,7 @@ def parse_inputs() -> Inputs:
             raise ValueError(f"{args.m} does not exist")
         if os.path.isdir(args.m):
             raise ValueError(f"{args.m} is a directory")
-        if not is_valid_gguf(args.m):
+        if not GGUFParser(args.m).is_valid():
             raise ValueError(f"{args.m} is not a valid GGUF file")
         files.append(os.path.realpath(args.m))
     if args.md:
@@ -115,82 +116,90 @@ def parse_inputs() -> Inputs:
         contents = [
             os.path.realpath(os.path.join(args.md, f)) for f in os.listdir(args.md)
         ]
-        valid_files = filter(is_valid_gguf, filter(os.path.isfile, contents))
+        valid_files = filter(
+            lambda f: GGUFParser(f).is_valid(), filter(os.path.isfile, contents)
+        )
         files.extend(valid_files)
     kwargs = {k: v for k, v in vars(args).items() if k not in ["m", "md"]}
     return Inputs(files, **kwargs)
 
 
-def is_valid_gguf(path: str) -> bool:
-    with open(path, "rb") as file:
-        magic_bytes = file.read(4)
-        if len(magic_bytes) < 4:
-            return False
-        [magic] = struct.unpack("<4s", magic_bytes)
-        return magic == b"GGUF"
+class GGUFParser:
+    VERSION = 3
+    NTYPES = 13
+    TYPES = "BbHhIif?s_Qqd"
+    SIZES = [1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8]
+    ValueType = int | float | bool | str | list
 
+    def __init__(self, path: str):
+        self.path = path
 
-GGUF_VERSION = 3
-GGUF_NTYPES = 13
-GGUF_TYPES = "BbHhIif?s_Qqd"
-GGUF_SIZES = [1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8]
-GGUF_Value = int | float | bool | str | list
+    def _read_type(self) -> (str, int):
+        type_id: int = struct.unpack("<I", self.f.read(4))[0]
+        if type_id >= GGUFParser.NTYPES:
+            raise TypeError("Unknown metadata type.")
+        value_type = GGUFParser.TYPES[type_id]
+        value_size = GGUFParser.SIZES[type_id]
+        return value_type, value_size
 
+    def _read_string(self) -> str:
+        length: int = struct.unpack("<Q", self.f.read(8))[0]
+        b: bytes = struct.unpack(f"<{length}s", self.f.read(length))[0]
+        return b.decode("utf-8")
 
-def read_gguf_type(f: io.BufferedReader) -> (str, int):
-    type_id: int = struct.unpack("<I", f.read(4))[0]
-    if type_id >= GGUF_NTYPES:
-        raise TypeError("Unknown metadata type.")
-    value_type = GGUF_TYPES[type_id]
-    value_size = GGUF_SIZES[type_id]
-    return value_type, value_size
+    def _read_array(self) -> list[ValueType]:
+        value_type, value_size = self._read_type()
+        length: int = struct.unpack("<Q", self.f.read(8))[0]
+        return [self._read_value(value_type, value_size) for _ in range(length)]
 
+    def _read_value(self, value_type: str, value_size: int) -> ValueType:
+        if value_type == "s":
+            return self._read_string()
+        if value_type == "_":
+            return self._read_array()
+        return struct.unpack(f"<{value_type}", self.f.read(value_size))[0]
 
-def read_gguf_string(f: io.BufferedReader) -> str:
-    length: int = struct.unpack("<Q", f.read(8))[0]
-    b: bytes = struct.unpack(f"<{length}s", f.read(length))[0]
-    return b.decode("utf-8")
+    def _read_kv(self) -> (str, ValueType):
+        key = self._read_string()
+        value_type, value_size = self._read_type()
+        value = self._read_value(value_type, value_size)
+        return key, value
 
-
-def read_gguf_array(f: io.BufferedReader) -> list[GGUF_Value]:
-    value_type, value_size = read_gguf_type(f)
-    length: int = struct.unpack("<Q", f.read(8))[0]
-    return [read_gguf_value(f, value_type, value_size) for _ in range(length)]
-
-
-def read_gguf_value(
-    f: io.BufferedReader, value_type: str, value_size: int
-) -> GGUF_Value:
-    if value_type == "s":
-        return read_gguf_string(f)
-    if value_type == "_":
-        return read_gguf_array(f)
-    return struct.unpack(f"<{value_type}", f.read(value_size))[0]
-
-
-def read_gguf_kv(f: io.BufferedReader) -> (str, GGUF_Value):
-    key = read_gguf_string(f)
-    value_type, value_size = read_gguf_type(f)
-    value = read_gguf_value(f, value_type, value_size)
-    return key, value
-
-
-def read_gguf_metadata(path: str):
-    with open(path, "rb") as f:
+    def _read_header(self) -> (str, int, int, int) | None:
+        size = 24
+        header_bytes = self.f.read(size)
+        if len(header_bytes) < size:
+            return None
         [magic, version, tensor_count, metadata_kv_count] = struct.unpack(
-            "<4sIQQ", f.read(24)
+            "<4sIQQ", header_bytes
         )
         if magic != b"GGUF":
-            raise ValueError(f"{path} is not a GGUF file.")
-        if version != GGUF_VERSION:
-            print(
-                f"Detected GGUF version {version}. This script was only tested with version {GGUF_VERSION} and may not work correctly."
-            )
-        metadata = {}
-        for _ in range(metadata_kv_count):
-            key, value = read_gguf_kv(f)
-            metadata[key] = value
-        return metadata
+            return None
+        return magic, version, tensor_count, metadata_kv_count
+
+    def read_metadata(self) -> dict[str, Any]:
+        with open(self.path, "rb") as f:
+            self.f = f
+            header = self._read_header()
+            if not header:
+                raise ValueError(f"{self.path} is not a GGUF file.")
+            [magic, version, tensor_count, metadata_kv_count] = header
+            if version != GGUFParser.VERSION:
+                print(
+                    f"Detected GGUF version {version}. This script was only tested with version {GGUFParser.VERSION} and may not work correctly."
+                )
+            metadata = {}
+            for _ in range(metadata_kv_count):
+                key, value = self._read_kv()
+                metadata[key] = value
+            return metadata
+
+    def is_valid(self) -> bool:
+        with open(self.path, "rb") as f:
+            self.f = f
+            if not self._read_header():
+                return False
+            return True
 
 
 class BenchRunner:
@@ -287,7 +296,7 @@ def main():
     inputs = parse_inputs()
     files = sorted(inputs.files, key=os.path.getsize)
     for file in files:
-        metadata = read_gguf_metadata(file)
+        metadata = GGUFParser(file).read_metadata()
         model_type = metadata.get("general.type", "")
         architecture = metadata.get("general.architecture", "")
         if model_type != "model":
