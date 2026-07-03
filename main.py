@@ -192,7 +192,7 @@ class GGUFParser:
             for _ in range(metadata_kv_count):
                 key, value = self._read_kv()
                 metadata[key] = value
-            return metadata
+            return metadata, tensor_count
 
     def is_valid(self) -> bool:
         with open(self.path, "rb") as f:
@@ -292,26 +292,90 @@ class CachedFunction[T, U]:
         return result
 
 
+def get_metadata(file: str):
+    gguf_meta, tensor_count = GGUFParser(file).read_metadata()
+    model_type = gguf_meta.get("general.type", "")
+    architecture = gguf_meta.get("general.architecture", "")
+    compatible = True
+    if model_type != "model":
+        print(f"Skipping {file} - incompatible type: {model_type}")
+        compatible = False
+    if (
+        not architecture
+        or "bert" in architecture
+        or architecture in ["whisper", "clip", "siglip"]
+    ):
+        print(f"Skipping {file} - incompatible architecture: {architecture}")
+        compatible = False
+    metadata = {
+        "gguf": gguf_meta,
+        "tensor_count": tensor_count,
+        "compatible": compatible,
+    }
+    return metadata
+
+
+def find_optimal_t(files: list[str]):
+    print("Finding optimal -t (CPU threads) ...")
+    t = 0
+    files = sorted(files, key=os.path.getsize)
+    ncpu = os.cpu_count() or 1
+    print(f"Detected CPU core count: {ncpu}")
+    for file in files:
+        metadata = get_metadata(file)
+        if not metadata["compatible"]:
+            continue
+        print(f"Using smallest model: {file}")
+        runner = BenchRunner("llama-bench", file, 1, repetitions=5, no_warmup=True)
+        func = CachedFunction(lambda x: runner.run_test(t=x, p=512, n=0, ngl=0))
+        t = fibonacci_search(func.invoke, 1, ncpu)
+        print(f"Found optimal -t {t}")
+        return t
+    if t == 0:
+        print("No valid model for test.")
+        exit(0)
+    return t
+
+
+def find_optimal_ngl(file: str, layers: int, t: int, fa: str, ctk: str, ctv: str):
+    runner = BenchRunner("llama-bench", file, t, no_warmup=True)
+    func = CachedFunction(
+        lambda x: runner.run_test(p=512, n=0, ngl=x, fa=fa, ctk=ctk, ctv=ctv)
+    )
+    return fibonacci_search(func.invoke, 0, layers)
+
+
+def find_optimal_b(
+    file: str, max_b: int, step: int, ngl: int, t: int, fa: str, ctk: str, ctv: str
+):
+    runner = BenchRunner("llama-bench", file, t, no_warmup=True)
+    test_values = range(max_b, 0, -step)
+    func = CachedFunction(
+        lambda x: runner.run_test(
+            p=512, n=0, b=test_values[x], ngl=ngl, fa=fa, ctk=ctk, ctv=ctv
+        )
+    )
+    result = fibonacci_search(func.invoke, 0, len(test_values))
+    return test_values[result]
+
+
 def main():
     inputs = parse_inputs()
-    files = sorted(inputs.files, key=os.path.getsize)
-    for file in files:
-        metadata = GGUFParser(file).read_metadata()
-        model_type = metadata.get("general.type", "")
-        architecture = metadata.get("general.architecture", "")
-        if model_type != "model":
-            print(f"Skipping {file} - incompatible type: {model_type}")
-            continue
-        if "bert" in architecture or architecture in ["whisper", "clip", "siglip"]:
-            print(f"Skipping {file} - incompatible architecture: {architecture}")
-            continue
-        context_length = metadata[f"{architecture}.context_length"]
-        print(file)
-        ncpu = os.cpu_count() or 1
-        runner = BenchRunner("llama-bench", file, ncpu, no_warmup=True)
-        func = CachedFunction(lambda x: runner.run_test(t=x, p=512, n=0, ngl=0))
-        result = fibonacci_search(func.invoke, 1, 12)
-        print(result)
+    if not inputs.t:
+        inputs.t = find_optimal_t(inputs.files)
+    for file in inputs.files:
+        metadata = get_metadata(file)
+        architecture = metadata["gguf"]["general.architecture"]
+        layers = metadata["gguf"][f"{architecture}.block_count"]
+        print(f"Benchmarking {file} ...")
+        ngl = find_optimal_ngl(
+            file, layers, inputs.t, inputs.fa, inputs.ctk, inputs.ctv
+        )
+        print(f"Found optimal -ngl {ngl}")
+        b = find_optimal_b(
+            file, 4096, 256, ngl, inputs.t, inputs.fa, inputs.ctk, inputs.ctv
+        )
+        print(f"Found optimal -b {b}")
 
 
 if __name__ == "__main__":
