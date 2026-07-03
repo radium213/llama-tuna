@@ -5,6 +5,7 @@ import io
 import subprocess
 import csv
 from dataclasses import dataclass
+from collections.abc import Callable
 
 
 @dataclass
@@ -235,6 +236,53 @@ class BenchRunner:
         return sum(avg_ts) / len(avg_ts)
 
 
+def fibonacci_search(f: Callable[[int], float], low: int, high: int):
+    def fib(n: int):
+        F = [0, 1]
+        while F[-1] < n:
+            F.append(F[-1] + F[-2])
+        return F
+
+    length = high - low + 1
+    F = fib(length)
+    n = len(F) - 1
+    offset = low - 1
+
+    a = offset + F[n - 2]
+    b = offset + F[n - 1]
+    f_a = f(a)
+    f_b = f(b)
+
+    while n > 3:
+        n -= 1
+        if f_a < f_b:
+            offset = a
+            a, f_a = b, f_b
+            b = offset + F[n - 1]
+            f_b = f(b)
+        else:
+            b, f_b = a, f_a
+            a = offset + F[n - 2]
+            f_a = f(a)
+
+    if f_a > f_b:
+        return a
+    return b
+
+
+class CachedFunction[T, U]:
+    def __init__(self, func: Callable[[T], U]):
+        self.func = func
+        self.cache = {}
+
+    def invoke(self, x: T) -> U:
+        result = self.cache.get(x, None)
+        if not result:
+            result = self.func(x)
+            self.cache[x] = result
+        return result
+
+
 def main():
     inputs = parse_inputs()
     files = sorted(inputs.files, key=os.path.getsize)
@@ -252,8 +300,9 @@ def main():
         print(file)
         ncpu = os.cpu_count() or 1
         runner = BenchRunner("llama-bench", file, ncpu, no_warmup=True)
-        data = runner.run_test(t=12, p=512, n=0, ngl=0)
-        print(data)
+        func = CachedFunction(lambda x: runner.run_test(t=x, p=512, n=0, ngl=0))
+        result = fibonacci_search(func.invoke, 1, 12)
+        print(result)
 
 
 if __name__ == "__main__":
