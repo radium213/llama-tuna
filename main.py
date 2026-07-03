@@ -257,8 +257,8 @@ def fibonacci_search(f: Callable[[int], float], low: int, high: int):
     n = len(F) - 1
     offset = low - 1
 
-    a = offset + F[n - 2]
-    b = offset + F[n - 1]
+    a = min(offset + F[n - 2], high)
+    b = min(offset + F[n - 1], high)
     f_a = f(a)
     f_b = f(b)
 
@@ -267,11 +267,11 @@ def fibonacci_search(f: Callable[[int], float], low: int, high: int):
         if f_a < f_b:
             offset = a
             a, f_a = b, f_b
-            b = offset + F[n - 1]
+            b = min(offset + F[n - 1], high)
             f_b = f(b)
         else:
             b, f_b = a, f_a
-            a = offset + F[n - 2]
+            a = min(offset + F[n - 2], high)
             f_a = f(a)
 
     if f_a > f_b:
@@ -352,10 +352,10 @@ def find_optimal_b(
     test_values = range(max_b, 0, -step)
     func = CachedFunction(
         lambda x: runner.run_test(
-            p=512, n=0, b=test_values[x], ngl=ngl, fa=fa, ctk=ctk, ctv=ctv
+            p=max_b, n=0, b=test_values[x], ngl=ngl, fa=fa, ctk=ctk, ctv=ctv
         )
     )
-    result = fibonacci_search(func.invoke, 0, len(test_values))
+    result = fibonacci_search(func.invoke, 0, len(test_values) - 1)
     return test_values[result]
 
 
@@ -365,6 +365,8 @@ def main():
         inputs.t = find_optimal_t(inputs.files)
     for file in inputs.files:
         metadata = get_metadata(file)
+        if not metadata["compatible"]:
+            continue
         architecture = metadata["gguf"]["general.architecture"]
         layers = metadata["gguf"][f"{architecture}.block_count"]
         print(f"Benchmarking {file} ...")
@@ -373,7 +375,7 @@ def main():
         )
         print(f"Found optimal -ngl {ngl}")
         b = find_optimal_b(
-            file, 4096, 256, ngl, inputs.t, inputs.fa, inputs.ctk, inputs.ctv
+            file, 4096, 512, ngl, inputs.t, inputs.fa, inputs.ctk, inputs.ctv
         )
         print(f"Found optimal -b {b}")
 
