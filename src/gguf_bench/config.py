@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 from dataclasses import dataclass
 from gguf_bench.gguf import GGUFParser
 
@@ -123,11 +124,21 @@ def load_inputs() -> Inputs:
 
     config = default_config | strip_none(env_config) | strip_none(cli_config)
 
+    binary = config["binary"]
+
+    if not shutil.which(binary):
+        if not os.path.exists(binary):
+            parser.error(
+                "llama-bench not found, make sure it's in PATH, or supply the path with either --llama-bench or the LLAMA_BENCH env var."
+            )
+
     src_f = args.m
     src_d = config["md"]
 
     if not src_f and not src_d:
-        parser.error("Provide either -m <file> or -md <directory>, or MODELS_DIR env var.")
+        parser.error(
+            "Provide either -m <file> or -md <directory>, or MODELS_DIR env var."
+        )
 
     files = []
     if src_f:
