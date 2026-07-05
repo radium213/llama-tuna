@@ -64,15 +64,11 @@ class GGUFParser:
             if not header:
                 raise ValueError(f"{self.path} is not a GGUF file.")
             [magic, version, tensor_count, metadata_kv_count] = header
-            if version != GGUFParser.VERSION:
-                print(
-                    f"Detected GGUF version {version}. This script was only tested with version {GGUFParser.VERSION} and may not work correctly."
-                )
             metadata = {}
             for _ in range(metadata_kv_count):
                 key, value = self._read_kv(f)
                 metadata[key] = value
-            return metadata, tensor_count
+            return metadata, version, tensor_count
 
     def is_valid(self) -> bool:
         with open(self.path, "rb") as f:

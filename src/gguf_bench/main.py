@@ -98,19 +98,22 @@ class CachedFunction[T, U]:
 
 
 def get_metadata(file: str):
-    gguf_meta, tensor_count = GGUFParser(file).read_metadata()
+    gguf_meta, gguf_version, tensor_count = GGUFParser(file).read_metadata()
     model_type = gguf_meta.get("general.type", "")
     architecture = gguf_meta.get("general.architecture", "")
     compatible = True
+    if gguf_version != GGUFParser.VERSION:
+        print(f"{file} - incompatible GGUF version: {gguf_version}")
+        compatible = False
     if model_type != "model":
-        print(f"Skipping {file} - incompatible type: {model_type}")
+        print(f"{file} - incompatible type: {model_type}")
         compatible = False
     if (
         not architecture
         or "bert" in architecture
         or architecture in ["whisper", "clip", "siglip"]
     ):
-        print(f"Skipping {file} - incompatible architecture: {architecture}")
+        print(f"{file} - incompatible architecture: {architecture}")
         compatible = False
     metadata = {
         "gguf": gguf_meta,
@@ -130,7 +133,7 @@ def find_optimal_t(binary: str, files: list[str]):
         metadata = get_metadata(file)
         if not metadata["compatible"]:
             continue
-        print(f"Using smallest model: {file}")
+        print(f"Using model: {file}")
         runner = BenchRunner(binary, file, 1, repetitions=5, no_warmup=True)
         func = CachedFunction(lambda x: runner.run_test(t=x, p=512, n=0, ngl=0))
         t = fibonacci_search(func.invoke, 1, ncpu)

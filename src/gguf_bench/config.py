@@ -127,21 +127,14 @@ def load_inputs() -> Inputs:
     src_d = config["md"]
 
     if not src_f and not src_d:
-        parser.error(
-            (
-                "One of the following is required:\n"
-                "-m\t\tGGUF model file\n"
-                "-md\t\tGGUF models directory\n"
-                "MODELS_DIR\tGGUF models directory (env variable)\n"
-            )
-        )
+        parser.error("Provide either -m <file> or -md <directory>, or MODELS_DIR env var.")
 
     files = []
     if src_f:
         if not os.path.exists(src_f):
             parser.error(f"{src_f} does not exist.")
         if os.path.isdir(src_f):
-            parser.error(f"{src_f} is a directory.")
+            parser.error(f"{src_f} is a directory, use -md.")
         if not GGUFParser(src_f).is_valid():
             parser.error(f"{src_f} is not a valid GGUF file.")
         files.append(os.path.realpath(src_f))
