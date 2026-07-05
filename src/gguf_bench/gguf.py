@@ -1,6 +1,6 @@
 import struct
 import io
-from typing import Any
+from pathlib import Path
 
 
 class GGUFParser:
@@ -10,7 +10,7 @@ class GGUFParser:
     SIZES = [1, 1, 2, 2, 4, 4, 4, 1, 0, 0, 8, 8]
     ValueType = int | float | bool | str | list
 
-    def __init__(self, path: str):
+    def __init__(self, path: str | Path):
         self.path = path
 
     def _read_type(self, f: io.BufferedReader) -> (str, int):
@@ -58,7 +58,7 @@ class GGUFParser:
             return None
         return magic, version, tensor_count, metadata_kv_count
 
-    def read_metadata(self) -> dict[str, Any]:
+    def read_metadata(self) -> dict[str, ValueType]:
         with open(self.path, "rb") as f:
             header = self._read_header(f)
             if not header:

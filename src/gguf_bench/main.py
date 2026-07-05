@@ -2,6 +2,7 @@ import os
 import io
 import subprocess
 import csv
+from pathlib import Path
 from collections.abc import Callable
 from gguf_bench.config import load_inputs
 from gguf_bench.gguf import GGUFParser
@@ -97,7 +98,7 @@ class CachedFunction[T, U]:
         return result
 
 
-def get_metadata(file: str):
+def get_metadata(file: Path):
     gguf_meta, gguf_version, tensor_count = GGUFParser(file).read_metadata()
     model_type = gguf_meta.get("general.type", "")
     architecture = gguf_meta.get("general.architecture", "")
@@ -123,7 +124,7 @@ def get_metadata(file: str):
     return metadata
 
 
-def find_optimal_t(binary: str, files: list[str]):
+def find_optimal_t(binary: str, files: list[Path]):
     print("Finding optimal -t (CPU threads) ...")
     t = 0
     files = sorted(files, key=os.path.getsize)
@@ -145,7 +146,7 @@ def find_optimal_t(binary: str, files: list[str]):
     return t
 
 
-def find_optimal_ngl(binary: str, file: str, layers: int, t: int, fa: str, ctk: str, ctv: str):
+def find_optimal_ngl(binary: str, file: Path, layers: int, t: int, fa: str, ctk: str, ctv: str):
     runner = BenchRunner(binary, file, t, no_warmup=True)
     func = CachedFunction(
         lambda x: runner.run_test(p=512, n=0, ngl=x, fa=fa, ctk=ctk, ctv=ctv)
@@ -154,7 +155,7 @@ def find_optimal_ngl(binary: str, file: str, layers: int, t: int, fa: str, ctk: 
 
 
 def find_optimal_b(
-    binary: str, file: str, max_b: int, step: int, ngl: int, t: int, fa: str, ctk: str, ctv: str
+    binary: str, file: Path, max_b: int, step: int, ngl: int, t: int, fa: str, ctk: str, ctv: str
 ):
     runner = BenchRunner(binary, file, t, no_warmup=True)
     test_values = range(max_b, 0, -step)
@@ -169,9 +170,10 @@ def find_optimal_b(
 
 def main():
     inputs = load_inputs()
+    gguf_files = [f for f in inputs.files if GGUFParser(f).is_valid()]
     if not inputs.t:
-        inputs.t = find_optimal_t(inputs.binary, inputs.files)
-    for file in inputs.files:
+        inputs.t = find_optimal_t(inputs.binary, gguf_files)
+    for file in gguf_files:
         metadata = get_metadata(file)
         if not metadata["compatible"]:
             continue

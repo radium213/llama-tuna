@@ -1,6 +1,7 @@
 import argparse
 import os
 import shutil
+from pathlib import Path
 from dataclasses import dataclass
 from gguf_bench.gguf import GGUFParser
 
@@ -8,7 +9,7 @@ from gguf_bench.gguf import GGUFParser
 @dataclass
 class Inputs:
     binary: str
-    files: list[str]
+    files: list[Path]
     fa: str
     ctk: str
     ctv: str
@@ -127,7 +128,7 @@ def load_inputs() -> Inputs:
     binary = config["binary"]
 
     if not shutil.which(binary):
-        if not os.path.exists(binary):
+        if not Path(binary).exists():
             parser.error(
                 "llama-bench not found, make sure it's in PATH, or supply the path with either --llama-bench or the LLAMA_BENCH env var."
             )
@@ -142,25 +143,24 @@ def load_inputs() -> Inputs:
 
     files = []
     if src_f:
-        if not os.path.exists(src_f):
-            parser.error(f"{src_f} does not exist.")
-        if os.path.isdir(src_f):
-            parser.error(f"{src_f} is a directory, use -md.")
-        if not GGUFParser(src_f).is_valid():
-            parser.error(f"{src_f} is not a valid GGUF file.")
-        files.append(os.path.realpath(src_f))
+        f = Path(src_f)
+        if not f.exists():
+            parser.error(f"{f} does not exist.")
+        if f.is_dir():
+            parser.error(f"{f} is a directory, use -md.")
+        abs_f = f.resolve()
+        if not GGUFParser(abs_f).is_valid():
+            parser.error(f"{f} is not a valid GGUF file.")
+        files.append(abs_f)
     if src_d:
-        if not os.path.exists(src_d):
-            parser.error(f"{src_d} does not exist.")
-        if not os.path.isdir(src_d):
-            parser.error(f"{src_d} is not a directory.")
-        contents = [os.path.realpath(os.path.join(src_d, f)) for f in os.listdir(src_d)]
-        gguf_files = filter(
-            lambda f: os.path.splitext(f)[1] == ".gguf",
-            filter(os.path.isfile, contents),
-        )
+        d = Path(src_d)
+        if not d.exists():
+            parser.error(f"{d} does not exist.")
+        if not d.is_dir():
+            parser.error(f"{d} is not a directory.")
+        gguf_files = [f.resolve() for f in d.iterdir() if f.is_file() and f.suffix.lower() == ".gguf"]
         if not gguf_files:
-            parser.error(f"{src_d} has no .gguf files.")
+            parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
     kwargs = {k: v for k, v in vars(args).items() if k not in ["m", "md", "binary"]}
