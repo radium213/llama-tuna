@@ -4,6 +4,7 @@ import subprocess
 import csv
 from pathlib import Path
 from collections.abc import Callable
+from tqdm import tqdm
 from gguf_bench.config import load_inputs
 from gguf_bench.gguf import GGUFParser
 
@@ -62,11 +63,15 @@ def fibonacci_search(f: Callable[[int], float], low: int, high: int):
     F = fib(length)
     n = len(F) - 1
     offset = low - 1
+    
+    tq = tqdm(total=n - 1)
 
     a = min(offset + F[n - 2], high)
     b = min(offset + F[n - 1], high)
     f_a = f(a)
+    tq.update()
     f_b = f(b)
+    tq.update()
 
     while n > 3:
         n -= 1
@@ -79,6 +84,8 @@ def fibonacci_search(f: Callable[[int], float], low: int, high: int):
             b, f_b = a, f_a
             a = min(offset + F[n - 2], high)
             f_a = f(a)
+        tq.update()
+    tq.close()
 
     if f_a > f_b:
         return a
