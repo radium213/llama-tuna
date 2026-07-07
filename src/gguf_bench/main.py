@@ -2,52 +2,66 @@ import os
 import io
 import subprocess
 import csv
+import sys
 from pathlib import Path
-from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass, asdict, replace
+from collections.abc import Callable, Iterable
+from typing import Literal
 from tqdm import tqdm
 from gguf_bench.config import load_inputs
 from gguf_bench.gguf import GGUFParser
 
 
+@dataclass
+class Parameters:
+    fa: Literal["on", "off"] = "on"
+    ctk: Literal["f16", "q8_0", "q4_0"] = "f16"
+    ctv: Literal["f16", "q8_0", "q4_0"] = "f16"
+    d: int = 0
+    t: int = 1
+    ngl: int = 0
+    b: int = 2048
+    ub: int = 512
+
+
 class BenchRunner:
+    binary: str
+    options: list[str]
+
     def __init__(
         self,
         binary: str,
-        model: str,
-        threads: int,
-        flash_attn: str = "on",
-        cache_type_k: str = "f16",
-        cache_type_v: str = "f16",
+        model: Path | str,
         repetitions: int = 3,
-        no_warmup: bool = False,
+        no_warmup: bool = True,
     ):
         self.binary = binary
-        self.options = {}
-        self.options["-m"] = model
-        self.options["-o"] = "csv"
-        self.options["-t"] = str(threads)
-        self.options["-fa"] = flash_attn
-        self.options["-ctk"] = cache_type_k
-        self.options["-ctv"] = cache_type_v
-        self.options["-r"] = str(repetitions)
+        self.options = [
+            "-m", str(model),
+            "-o", "csv",
+            "-r", str(repetitions)
+        ]
         if no_warmup:
-            self.options["--no-warmup"] = ""
+            self.options.append("--no-warmup")
 
-    def run_llama_bench(self, **kwargs) -> str | None:
-        extra_options = {f"-{k}": v for k, v in kwargs.items()}
-        options = self.options | extra_options
-        args = [str(e) for item in options.items() for e in item if e != ""]
-        cmd = [self.binary] + args
-        result = subprocess.run(cmd, capture_output=True, text=True)
+    def run_test(self, params: Parameters) -> float:
+        options: list[str] = []
+        for k, v in asdict(params).items():
+            if v is not None:
+                options.extend([f"-{k}", str(v)])
+        cmd = [self.binary] + options + self.options
+
+        def set_oom_score():
+            with suppress(FileNotFoundError, PermissionError):
+                with open("/proc/self/oom_score_adj", "w") as f:
+                    f.write(str(1000))
+
+        result = subprocess.run(cmd, preexec_fn=set_oom_score, capture_output=True, text=True)
+
         if result.returncode != 0:
-            return None
-        return result.stdout
-
-    def run_test(self, **kwargs) -> float:
-        result = self.run_llama_bench(**kwargs)
-        if result is None:
             return 0.0
-        data = csv.DictReader(io.StringIO(result))
+        data = csv.DictReader(io.StringIO(result.stdout))
         avg_ts = [float(row["avg_ts"]) for row in data]
         return sum(avg_ts) / len(avg_ts)
 
@@ -93,6 +107,9 @@ def fibonacci_search(f: Callable[[int], float], low: int, high: int):
 
 
 class CachedFunction[T, U]:
+    func: Callable[[T], U]
+    cache: dict[T, U]
+
     def __init__(self, func: Callable[[T], U]):
         self.func = func
         self.cache = {}
@@ -131,69 +148,78 @@ def get_metadata(file: Path):
     return metadata
 
 
-def find_optimal_t(binary: str, files: list[Path]):
-    print("Finding optimal -t (CPU threads) ...")
-    t = 0
+def get_smallest_model(files: list[Path]) -> Path | None:
     files = sorted(files, key=os.path.getsize)
-    ncpu = os.cpu_count() or 1
-    print(f"Detected CPU core count: {ncpu}")
     for file in files:
         metadata = get_metadata(file)
         if not metadata["compatible"]:
             continue
-        print(f"Using model: {file}")
-        runner = BenchRunner(binary, file, 1, repetitions=5, no_warmup=True)
-        func = CachedFunction(lambda x: runner.run_test(t=x, p=512, n=0, ngl=0))
-        t = fibonacci_search(func.invoke, 1, ncpu)
-        print(f"Found optimal -t {t}")
-        return t
-    if t == 0:
-        print("No valid model for test.")
-        exit(0)
-    return t
+        return file
+    return None
 
 
-def find_optimal_ngl(binary: str, file: Path, layers: int, t: int, fa: str, ctk: str, ctv: str):
-    runner = BenchRunner(binary, file, t, no_warmup=True)
-    func = CachedFunction(
-        lambda x: runner.run_test(p=512, n=0, ngl=x, fa=fa, ctk=ctk, ctv=ctv)
-    )
-    return fibonacci_search(func.invoke, 0, layers)
+class Optimizer[T]:
+    runner: BenchRunner
+    param: str
+    search_space: list[T]
+    fixed: Parameters
 
-
-def find_optimal_b(
-    binary: str, file: Path, max_b: int, step: int, ngl: int, t: int, fa: str, ctk: str, ctv: str
-):
-    runner = BenchRunner(binary, file, t, no_warmup=True)
-    test_values = range(max_b, 0, -step)
-    func = CachedFunction(
-        lambda x: runner.run_test(
-            p=max_b, n=0, b=test_values[x], ngl=ngl, fa=fa, ctk=ctk, ctv=ctv
+    def __init__(self, runner: BenchRunner, param: str, search_space: Iterable[T], fixed_params: Parameters):
+        self.runner = runner
+        self.param = param
+        self.search_space = list(search_space)
+        self.fixed = fixed_params
+    
+    def search(self) -> T:
+        func = CachedFunction[int, float](
+            lambda i: self.runner.run_test(
+                replace(self.fixed, **{self.param: self.search_space[i]})
+            )
         )
-    )
-    result = fibonacci_search(func.invoke, 0, len(test_values) - 1)
-    return test_values[result]
+
+        i_best = fibonacci_search(func.invoke, 0, len(self.search_space) - 1)
+
+        return self.search_space[i_best]
 
 
 def main():
     inputs = load_inputs()
     gguf_files = [f for f in inputs.files if GGUFParser(f).is_valid()]
     if not inputs.t:
-        inputs.t = find_optimal_t(inputs.binary, gguf_files)
+        print("Finding optimal -t (CPU threads) ...")
+        ncpu = os.cpu_count() or 1
+        print(f"Detected CPU core count: {ncpu}")
+        min_model = get_smallest_model(inputs.files)
+        if min_model is None:
+            sys.exit("No valid model for test.")
+        opt = Optimizer(
+            BenchRunner(inputs.binary, min_model),
+            "t",
+            range(1, ncpu + 1),
+            Parameters(ngl=0)
+        )
+        inputs.t = opt.search()
     for file in gguf_files:
         metadata = get_metadata(file)
         if not metadata["compatible"]:
             continue
-        architecture = metadata["gguf"]["general.architecture"]
-        layers = metadata["gguf"][f"{architecture}.block_count"]
+        architecture: str = metadata["gguf"]["general.architecture"]
+        layers: int = metadata["gguf"][f"{architecture}.block_count"]
         print(f"Benchmarking {file} ...")
-        ngl = find_optimal_ngl(
-            inputs.binary, file, layers, inputs.t, inputs.fa, inputs.ctk, inputs.ctv
-        )
+        bench = BenchRunner(inputs.binary, file)
+        ngl = Optimizer(
+            bench,
+            "ngl",
+            range(0, layers + 1),
+            Parameters(t=inputs.t)
+        ).search()
         print(f"Found optimal -ngl {ngl}")
-        b = find_optimal_b(
-            inputs.binary, file, 4096, 512, ngl, inputs.t, inputs.fa, inputs.ctk, inputs.ctv
-        )
+        b = Optimizer(
+            bench,
+            "b",
+            range(4096, 0, -512),
+            Parameters(t=inputs.t, ngl=ngl)
+        ).search()
         print(f"Found optimal -b {b}")
 
 
