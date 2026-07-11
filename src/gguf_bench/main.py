@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import suppress
 from dataclasses import dataclass, asdict, replace
 from collections.abc import Callable, Iterable
-from typing import Literal
+from typing import Generator, Literal, Protocol
 from tqdm import tqdm
 from gguf_bench.config import load_inputs
 from gguf_bench.gguf import GGUFParser
@@ -19,6 +19,8 @@ class Parameters:
     ctk: Literal["f16", "q8_0", "q4_0"] = "f16"
     ctv: Literal["f16", "q8_0", "q4_0"] = "f16"
     d: int = 0
+    p: int = 512
+    n: int = 128
     t: int = 1
     ngl: int = 0
     b: int = 2048
@@ -64,46 +66,6 @@ class BenchRunner:
         data = csv.DictReader(io.StringIO(result.stdout))
         avg_ts = [float(row["avg_ts"]) for row in data]
         return sum(avg_ts) / len(avg_ts)
-
-
-def fibonacci_search(f: Callable[[int], float], low: int, high: int):
-    def fib(n: int):
-        F = [0, 1]
-        while F[-1] < n:
-            F.append(F[-1] + F[-2])
-        return F
-
-    length = high - low + 1
-    F = fib(length)
-    n = len(F) - 1
-    offset = low - 1
-    
-    tq = tqdm(total=n - 1)
-
-    a = min(offset + F[n - 2], high)
-    b = min(offset + F[n - 1], high)
-    f_a = f(a)
-    tq.update()
-    f_b = f(b)
-    tq.update()
-
-    while n > 3:
-        n -= 1
-        if f_a < f_b:
-            offset = a
-            a, f_a = b, f_b
-            b = min(offset + F[n - 1], high)
-            f_b = f(b)
-        else:
-            b, f_b = a, f_a
-            a = min(offset + F[n - 2], high)
-            f_a = f(a)
-        tq.update()
-    tq.close()
-
-    if f_a > f_b:
-        return a
-    return b
 
 
 class CachedFunction[T, U]:
@@ -158,47 +120,108 @@ def get_smallest_model(files: list[Path]) -> Path | None:
     return None
 
 
-class Optimizer[T]:
-    runner: BenchRunner
-    param: str
-    search_space: list[T]
-    fixed: Parameters
+class FibonacciStrategy:
+    func: Callable[[int], float]
+    low: int
+    high: int
+    fib: tuple[int, int, int]
+    k: int
 
-    def __init__(self, runner: BenchRunner, param: str, search_space: Iterable[T], fixed_params: Parameters):
-        self.runner = runner
-        self.param = param
-        self.search_space = list(search_space)
-        self.fixed = fixed_params
+    def __init__(self, func: Callable[[int], float], low: int, high: int):
+        self.func = func
+        self.low = low
+        self.high = high
+        fib = (1, 1, 0)
+        k = 3
+        length = high - low
+        while fib[0] < length:
+            k += 1
+            fib = (fib[0] + fib[1], fib[0], fib[1])
+        self.fib = fib
+        self.k = k
     
-    def search(self) -> T:
-        func = CachedFunction[int, float](
-            lambda i: self.runner.run_test(
-                replace(self.fixed, **{self.param: self.search_space[i]})
-            )
+    def __iter__(self) -> Generator[tuple[int, float], None, None]:
+        func, fib, low, high = self.func, self.fib, self.low, self.high
+
+        def get_section(i: int) -> int:
+            return int(round(low + fib[i] / fib[0] * (high - low)))
+        
+        a = get_section(2)
+        b = get_section(1)
+        if a == b:
+            a -= 1
+        
+        self.k -= 1
+        f_a = func(a)
+        yield a, f_a
+        self.k -= 1
+        f_b = func(b)
+        yield b, f_b
+
+        while self.k > 1:
+            self.k -= 1
+            if f_a > f_b:
+                high, b, f_b = b, a, f_a
+                a = get_section(2)
+                if a == b and a > low:
+                    a -= 1
+                f_a = func(a)
+                yield a, f_a
+            else:
+                low, a, f_a = a, b, f_b
+                b = get_section(1)
+                if a == b and b < high:
+                    b += 1
+                f_b = func(b)
+                yield b, f_b
+            fib = (fib[1], fib[2], fib[1] - fib[2])
+        
+        if f_a > f_b:
+            yield a, f_a
+        else:
+            yield b, f_b
+
+    def __len__(self) -> int:
+        return self.k
+
+
+def optimize[T](runner: BenchRunner, param: str, search_space: Iterable[T], fixed_params: Parameters) -> T:
+    values = list(search_space)
+    func = CachedFunction[int, float](
+        lambda i: runner.run_test(
+            replace(fixed_params, **{param: values[i]})
         )
+    )
 
-        i_best = fibonacci_search(func.invoke, 0, len(self.search_space) - 1)
+    strategy = FibonacciStrategy(func.invoke, 0, len(values) - 1)
+    i_best = 0
+    with tqdm(strategy, f"[ {param:>3} ]") as tq:
+        tq.set_postfix_str("?t/s")
+        for i, f in tq:
+            i_best = i
+            if f >= 1.0:
+                tq.set_postfix_str(f"{f:.0f}t/s")
+            else:
+                tq.set_postfix_str(f"{1.0/f:.2f}s/t")
 
-        return self.search_space[i_best]
+    return values[i_best]
 
 
 def main():
     inputs = load_inputs()
     gguf_files = [f for f in inputs.files if GGUFParser(f).is_valid()]
     if not inputs.t:
-        print("Finding optimal -t (CPU threads) ...")
         ncpu = os.cpu_count() or 1
-        print(f"Detected CPU core count: {ncpu}")
         min_model = get_smallest_model(inputs.files)
         if min_model is None:
             sys.exit("No valid model for test.")
-        opt = Optimizer(
+        inputs.t = optimize(
             BenchRunner(inputs.binary, min_model),
             "t",
             range(1, ncpu + 1),
-            Parameters(ngl=0)
+            Parameters(ngl=0, n=0),
         )
-        inputs.t = opt.search()
+        print(f"Found t: {inputs.t}")
     for file in gguf_files:
         metadata = get_metadata(file)
         if not metadata["compatible"]:
@@ -207,20 +230,13 @@ def main():
         layers: int = metadata["gguf"][f"{architecture}.block_count"]
         print(f"Benchmarking {file} ...")
         bench = BenchRunner(inputs.binary, file)
-        ngl = Optimizer(
+        ngl = optimize(
             bench,
             "ngl",
             range(0, layers + 1),
-            Parameters(t=inputs.t)
-        ).search()
+            Parameters(t=inputs.t),
+        )
         print(f"Found optimal -ngl {ngl}")
-        b = Optimizer(
-            bench,
-            "b",
-            range(4096, 0, -512),
-            Parameters(t=inputs.t, ngl=ngl)
-        ).search()
-        print(f"Found optimal -b {b}")
 
 
 if __name__ == "__main__":
