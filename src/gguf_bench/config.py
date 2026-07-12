@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
-from gguf_bench.gguf import GGUFParser
+from gguf_bench.gguf import GGUFFile
 
 
 @dataclass
@@ -149,7 +149,7 @@ def load_inputs() -> Inputs:
         if f.is_dir():
             parser.error(f"{f} is a directory, use -md.")
         abs_f = f.resolve()
-        if not GGUFParser(abs_f).is_valid():
+        if not GGUFFile(abs_f).is_valid():
             parser.error(f"{f} is not a valid GGUF file.")
         files.append(abs_f)
     if src_d:
