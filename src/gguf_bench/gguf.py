@@ -16,7 +16,7 @@ class GGUFMetadata:
     architecture: str
     block_count: int
     context_length: int
-    raw: dict[str, ValueType] = {}
+    raw: dict[str, ValueType]
 
 
 class GGUFFile:

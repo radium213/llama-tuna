@@ -1,4 +1,5 @@
 import io
+import sys
 import subprocess
 import csv
 from pathlib import Path
@@ -161,6 +162,6 @@ def optimize[T](runner: BenchRunner, param: str, search_space: Iterable[T], fixe
             if f >= 1.0:
                 tq.set_postfix_str(f"{f:.0f}t/s")
             else:
-                tq.set_postfix_str(f"{1.0/f:.2f}s/t")
+                tq.set_postfix_str(f"{1.0/(f + sys.float_info.epsilon):.2f}s/t")
 
     return values[i_best]

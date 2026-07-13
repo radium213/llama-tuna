@@ -7,17 +7,22 @@ from gguf_bench.gguf import GGUFFile
 
 
 @dataclass
+class InputParameters:
+    fa: str | None = None
+    ctk: str | None = None
+    ctv: str | None = None
+    d: int | None = None
+    t: int | None = None
+    ngl: int | None = None
+    b: int | None = None
+    ub: int | None = None
+
+
+@dataclass
 class Inputs:
     binary: str
     files: list[Path]
-    fa: str
-    ctk: str
-    ctv: str
-    d: int
-    t: int | None
-    ngl: int | None
-    b: int | None
-    ub: int | None
+    params: InputParameters
 
 
 def create_arg_parser() -> argparse.ArgumentParser:
@@ -43,28 +48,24 @@ def create_arg_parser() -> argparse.ArgumentParser:
         type=str,
         choices=["on", "off"],
         help="use flash attention",
-        default="on",
     )
     group_global.add_argument(
         "-ctk",
         type=str,
         choices=["f16", "q8_0", "q4_0"],
         help="cache type K",
-        default="f16",
     )
     group_global.add_argument(
         "-ctv",
         type=str,
         choices=["f16", "q8_0", "q4_0"],
         help="cache type V",
-        default="f16",
     )
     group_global.add_argument(
         "-d",
         type=int,
         metavar="depth",
         help="context depth for test",
-        default=0,
     )
     group_global.add_argument(
         "--llama-bench",
@@ -107,41 +108,42 @@ def load_inputs() -> Inputs:
     parser = create_arg_parser()
     args = parser.parse_args()
 
-    default_config = {
+    default_config: dict[str, str | None] = {
         "binary": "llama-bench",
         "md": None,
     }
-    env_config = {
+    env_config: dict[str, str | None] = {
         "binary": os.environ.get("LLAMA_BENCH", None),
         "md": os.environ.get("MODELS_DIR", None),
     }
-    cli_config = {
+    cli_config: dict[str, str | None] = {
         "binary": args.binary,
         "md": args.md,
     }
 
-    def strip_none(d: dict):
+    def strip_none(d: dict[str, str | None]) -> dict[str, str]:
         return {k: v for k, v in d.items() if v is not None}
 
-    config = default_config | strip_none(env_config) | strip_none(cli_config)
+    config: dict[str, str | None] = (
+        default_config | strip_none(env_config) | strip_none(cli_config)
+    )
 
-    binary = config["binary"]
+    binary: str | None = config["binary"]
 
-    if not shutil.which(binary):
-        if not Path(binary).exists():
-            parser.error(
-                "llama-bench not found, make sure it's in PATH, or supply the path with either --llama-bench or the LLAMA_BENCH env var."
-            )
+    if binary is None or (not shutil.which(binary) and not Path(binary).exists()):
+        parser.error(
+            "llama-bench not found, make sure it's in PATH, or supply the path with either --llama-bench or the LLAMA_BENCH env var."
+        )
 
-    src_f = args.m
-    src_d = config["md"]
+    src_f: str | None = args.m
+    src_d: str | None = config["md"]
 
     if not src_f and not src_d:
         parser.error(
             "Provide either -m <file> or -md <directory>, or MODELS_DIR env var."
         )
 
-    files = []
+    files: list[Path] = []
     if src_f:
         f = Path(src_f)
         if not f.exists():
@@ -158,10 +160,14 @@ def load_inputs() -> Inputs:
             parser.error(f"{d} does not exist.")
         if not d.is_dir():
             parser.error(f"{d} is not a directory.")
-        gguf_files = [f.resolve() for f in d.iterdir() if f.is_file() and f.suffix.lower() == ".gguf"]
+        gguf_files = [
+            f.resolve()
+            for f in d.iterdir()
+            if f.is_file() and f.suffix.lower() == ".gguf"
+        ]
         if not gguf_files:
             parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
     kwargs = {k: v for k, v in vars(args).items() if k not in ["m", "md", "binary"]}
-    return Inputs(config["binary"], files, **kwargs)
+    return Inputs(str(config["binary"]), files, InputParameters(**kwargs))
