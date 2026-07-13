@@ -4,9 +4,29 @@ from gguf_bench.config import load_inputs
 from gguf_bench.gguf import GGUFFile
 from gguf_bench.optimize import BenchRunner, Parameters, optimize
 
+OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
+
+
+def format_cli(command: str, params: Parameters) -> str:
+    options: list[str] = []
+    for k, v in asdict(params).items():
+        if k in OPTIONS_INCLUDE:
+            options.extend([f"-{k}", str(v)])
+    return " ".join([command] + options) + "\n"
+
+
+def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
+    label = f"[{name}-{sizelabel}]"
+    options: list[str] = [f"model = {file}"]
+    for k, v in asdict(params).items():
+        if k in OPTIONS_INCLUDE:
+            options.append(f"{k} = {v}")
+    return "\n".join([label] + options) + "\n\n"
+
 
 def main():
     inputs = load_inputs()
+    output = ""
 
     gguf_files = [f for f in inputs.files if GGUFFile(f).is_valid()]
     for file in gguf_files:
@@ -28,10 +48,10 @@ def main():
 
         print(f"{file} - beginning benchmark...")
         bench = BenchRunner(inputs.binary, file)
-        defaults = Parameters(
+        params = Parameters(
             **{k: v for k, v in asdict(inputs.params).items() if v is not None}
         )
-        defaults.n = 0
+        params.n = 0
 
         if inputs.params.t is None:
             ncpu = os.cpu_count() or 1
@@ -39,9 +59,9 @@ def main():
                 bench,
                 "t",
                 range(1, ncpu + 1),
-                replace(defaults, ngl=0),
+                replace(params, ngl=0),
             )
-            defaults.t = inputs.params.t = t
+            params.t = inputs.params.t = t
 
         if inputs.params.ngl is None:
             layers = metadata.block_count
@@ -49,11 +69,20 @@ def main():
                 bench,
                 "ngl",
                 range(0, layers + 1),
-                defaults
+                params
             )
-            defaults.ngl = ngl
+            params.ngl = ngl
         
-        print(defaults)
+        if inputs.out_format == "cli":
+            output += format_cli("llama-server", params)
+        if inputs.out_format == "ini":
+            output += format_ini(str(file), metadata.name, metadata.size_label, params)
+    
+    if inputs.outfile:
+        with open(inputs.outfile, "w") as f:
+            f.write(output)
+    else:
+        print("\n" + output)
 
 
 if __name__ == "__main__":

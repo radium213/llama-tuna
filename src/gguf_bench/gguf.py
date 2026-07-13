@@ -14,6 +14,8 @@ class GGUFMetadata:
     tensor_count: int
     file_type: str
     architecture: str
+    name: str
+    size_label: str
     block_count: int
     context_length: int
     raw: dict[str, ValueType]
@@ -89,6 +91,8 @@ class GGUFFile:
         gguf_meta, gguf_version, tensor_count = self._read_metadata()
         file_type = gguf_meta.get("general.type", "")
         architecture = gguf_meta.get("general.architecture", "")
+        name = gguf_meta.get("general.name", "")
+        size_label = gguf_meta.get("general.size_label", "")
         block_count = gguf_meta.get(f"{architecture}.block_count", 0)
         context_length = gguf_meta.get(f"{architecture}.context_length", 0)
         return GGUFMetadata(
@@ -96,6 +100,8 @@ class GGUFFile:
             tensor_count,
             str(file_type),
             str(architecture),
+            str(name),
+            str(size_label),
             int(block_count) if isinstance(block_count, int) else 0,
             int(context_length) if isinstance(context_length, int) else 0,
             raw=gguf_meta,

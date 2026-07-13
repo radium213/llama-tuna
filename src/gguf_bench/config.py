@@ -23,6 +23,8 @@ class Inputs:
     binary: str
     files: list[Path]
     params: InputParameters
+    outfile: str | None
+    out_format: str
 
 
 def create_arg_parser() -> argparse.ArgumentParser:
@@ -68,6 +70,31 @@ def create_arg_parser() -> argparse.ArgumentParser:
         help="context depth for test",
     )
     group_global.add_argument(
+        "-b",
+        type=int,
+        metavar="batch-size",
+        help="batch size",
+    )
+    group_global.add_argument(
+        "-ub",
+        type=int,
+        metavar="ubatch-size",
+        help="microbatch size",
+    )
+    group_global.add_argument(
+        "-o",
+        type=str,
+        metavar="filename",
+        help="output file",
+    )
+    group_global.add_argument(
+        "-of",
+        type=str,
+        choices=["cli", "ini"],
+        help="output format: llama-server CLI string or ini",
+        default="cli",
+    )
+    group_global.add_argument(
         "--llama-bench",
         type=str,
         metavar="path",
@@ -88,18 +115,6 @@ def create_arg_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="n-gpu-layers",
         help="number of layers offloaded to GPU",
-    )
-    group_test.add_argument(
-        "-b",
-        type=int,
-        metavar="batch-size",
-        help="batch size",
-    )
-    group_test.add_argument(
-        "-ub",
-        type=int,
-        metavar="ubatch-size",
-        help="microbatch size",
     )
     return parser
 
@@ -169,5 +184,9 @@ def load_inputs() -> Inputs:
             parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
-    kwargs = {k: v for k, v in vars(args).items() if k not in ["m", "md", "binary"]}
-    return Inputs(str(config["binary"]), files, InputParameters(**kwargs))
+    kwargs = {
+        k: v for k, v in vars(args).items() if k not in ["m", "md", "binary", "o", "of"]
+    }
+    return Inputs(
+        str(config["binary"]), files, InputParameters(**kwargs), args.o, args.of
+    )
