@@ -1,7 +1,7 @@
 import os
 from dataclasses import asdict, replace
 from gguf_bench.config import load_inputs
-from gguf_bench.gguf import GGUFFile
+from gguf_bench.gguf import read_gguf_metadata, GGUFParsingError
 from gguf_bench.optimize import BenchRunner, Parameters, optimize
 
 OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
@@ -28,17 +28,16 @@ def main():
     inputs = load_inputs()
     output = ""
 
-    gguf_files = [f for f in inputs.files if GGUFFile(f).is_valid()]
-    for file in gguf_files:
-        metadata = GGUFFile(file).get_metadata()
-        if metadata.version != GGUFFile.VERSION:
-            print(f"{file} - incompatible GGUF version: {metadata.version}")
+    for file in inputs.files:
+        try:
+            metadata = read_gguf_metadata(file)
+        except GGUFParsingError as e:
+            print(f"{file} - {e}")
             continue
         if metadata.file_type != "model":
             print(f"{file} - incompatible type: {metadata.file_type}")
             continue
-        if "bert" in metadata.architecture or metadata.architecture in [
-            "",
+        if not metadata.architecture or metadata.architecture in [
             "whisper",
             "clip",
             "siglip",
@@ -72,12 +71,12 @@ def main():
                 params
             )
             params.ngl = ngl
-        
+
         if inputs.out_format == "cli":
             output += format_cli("llama-server", params)
         if inputs.out_format == "ini":
             output += format_ini(str(file), metadata.name, metadata.size_label, params)
-    
+
     if inputs.outfile:
         with open(inputs.outfile, "w") as f:
             f.write(output)
