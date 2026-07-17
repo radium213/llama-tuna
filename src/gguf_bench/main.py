@@ -27,6 +27,7 @@ def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
 def main():
     inputs = load_inputs()
     output = ""
+    global_t = inputs.params.t
 
     for file in inputs.files:
         try:
@@ -52,7 +53,7 @@ def main():
         )
         params.n = 0
 
-        if inputs.params.t is None:
+        if global_t is None:
             ncpu = os.cpu_count() or 1
             t = optimize(
                 bench,
@@ -60,7 +61,7 @@ def main():
                 range(1, ncpu + 1),
                 replace(params, ngl=0),
             )
-            params.t = inputs.params.t = t
+            params.t = global_t = t
 
         if inputs.params.ngl is None:
             layers = metadata.block_count

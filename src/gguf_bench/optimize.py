@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable
 from typing import Generator, Literal, Protocol
 from tqdm import tqdm
 
+
 @dataclass
 class Parameters:
     fa: Literal["on", "off"] = "on"
@@ -71,6 +72,9 @@ class Strategy(Protocol):
     def __len__(self) -> int:
         ...
 
+    def result(self) -> int:
+        ...
+
 
 class FibonacciStrategy:
     func: Callable[[int], float]
@@ -78,13 +82,14 @@ class FibonacciStrategy:
     high: int
     fib: tuple[int, int, int]
     k: int
+    _result: int
 
     def __init__(self, func: Callable[[int], float], low: int, high: int):
         self.func = func
         self.low = low
         self.high = high
         fib = (1, 1, 0)
-        k = 3
+        k = 2
         length = high - low
         while fib[0] < length:
             k += 1
@@ -129,18 +134,22 @@ class FibonacciStrategy:
             fib = (fib[1], fib[2], fib[1] - fib[2])
         
         if f_a > f_b:
-            yield a, f_a
+            self._result = a
         else:
-            yield b, f_b
+            self._result = b
 
     def __len__(self) -> int:
-        return self.k
+        return self.k - 1
+
+    def result(self) -> int:
+        return self._result
 
 
 class GridStrategy:
     func: Callable[[int], float]
     low: int
     high: int
+    _result: int
 
     def __init__(self, func: Callable[[int], float], low: int, high: int):
         self.func = func
@@ -158,10 +167,13 @@ class GridStrategy:
             if f_i > f_max:
                 i_max = i
                 f_max = f_i
-        yield i_max, f_max
+        self._result = i_max
 
     def __len__(self) -> int:
         return self.high - self.low + 1
+
+    def result(self) -> int:
+        return self._result
 
 
 class CachedFunction[T, U]:
@@ -189,19 +201,17 @@ def optimize[T](runner: BenchRunner, param: str, search_space: Iterable[T], fixe
     )
 
     strategy: Strategy
-    if len(values) <= 3:
-        strategy = GridStrategy(func.invoke, 0, len(values) - 1)
+    n = len(values)
+    if n <= 3:
+        strategy = GridStrategy(func.invoke, 0, n - 1)
     else:
-        strategy = FibonacciStrategy(func.invoke, 0, len(values) - 1)
+        strategy = FibonacciStrategy(func.invoke, 0, n - 1)
 
-    i_best = 0
     with tqdm(strategy, f"[ {param:>3} ]") as tq:
         tq.set_postfix_str("?t/s")
-        for i, f in tq:
-            i_best = i
+        for _, f in tq:
             if f >= 1.0:
                 tq.set_postfix_str(f"{f:.0f}t/s")
             else:
                 tq.set_postfix_str(f"{1.0/(f + sys.float_info.epsilon):.2f}s/t")
-
-    return values[i_best]
+        return values[strategy.result()]
