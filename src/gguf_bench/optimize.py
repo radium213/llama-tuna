@@ -186,7 +186,7 @@ class CachedFunction[T, U]:
 
     def invoke(self, x: T) -> U:
         result = self.cache.get(x, None)
-        if not result:
+        if result is None:
             result = self.func(x)
             self.cache[x] = result
         return result
