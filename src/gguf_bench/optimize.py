@@ -1,5 +1,4 @@
 import io
-import sys
 import subprocess
 import csv
 from pathlib import Path
@@ -36,11 +35,7 @@ class BenchRunner:
         no_warmup: bool = True,
     ):
         self.binary = binary
-        self.options = [
-            "-m", str(model),
-            "-o", "csv",
-            "-r", str(repetitions)
-        ]
+        self.options = ["-m", str(model), "-o", "csv", "-r", str(repetitions)]
         if no_warmup:
             self.options.append("--no-warmup")
 
@@ -56,7 +51,9 @@ class BenchRunner:
                 with open("/proc/self/oom_score_adj", "w") as f:
                     f.write(str(1000))
 
-        result = subprocess.run(cmd, preexec_fn=set_oom_score, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, preexec_fn=set_oom_score, capture_output=True, text=True
+        )
 
         if result.returncode != 0:
             return 0.0
@@ -66,14 +63,11 @@ class BenchRunner:
 
 
 class Strategy(Protocol):
-    def __iter__(self) -> Generator[tuple[int, float], None, None]:
-        ...
-    
-    def __len__(self) -> int:
-        ...
+    def __iter__(self) -> Generator[tuple[int, float], None, None]: ...
 
-    def result(self) -> int:
-        ...
+    def __len__(self) -> int: ...
+
+    def result(self) -> int: ...
 
 
 class FibonacciStrategy:
@@ -96,18 +90,18 @@ class FibonacciStrategy:
             fib = (fib[0] + fib[1], fib[0], fib[1])
         self.fib = fib
         self.k = k
-    
+
     def __iter__(self) -> Generator[tuple[int, float], None, None]:
         func, fib, low, high = self.func, self.fib, self.low, self.high
 
         def get_section(i: int) -> int:
             return int(round(low + fib[i] / fib[0] * (high - low)))
-        
+
         a = get_section(2)
         b = get_section(1)
         if a == b:
             a -= 1
-        
+
         self.k -= 1
         f_a = func(a)
         yield a, f_a
@@ -132,7 +126,7 @@ class FibonacciStrategy:
                 f_b = func(b)
                 yield b, f_b
             fib = (fib[1], fib[2], fib[1] - fib[2])
-        
+
         if f_a > f_b:
             self._result = a
         else:
@@ -155,7 +149,7 @@ class GridStrategy:
         self.func = func
         self.low = low
         self.high = high
-    
+
     def __iter__(self) -> Generator[tuple[int, float], None, None]:
         func, low, high = self.func, self.low, self.high
 
@@ -192,12 +186,15 @@ class CachedFunction[T, U]:
         return result
 
 
-def optimize[T](runner: BenchRunner, param: str, search_space: Iterable[T], fixed_params: Parameters) -> T:
+def optimize[T](
+    runner: BenchRunner,
+    param: str,
+    search_space: Iterable[T],
+    fixed_params: Parameters,
+) -> T:
     values = list(search_space)
     func = CachedFunction[int, float](
-        lambda i: runner.run_test(
-            replace(fixed_params, **{param: values[i]})
-        )
+        lambda i: runner.run_test(replace(fixed_params, **{param: values[i]}))
     )
 
     strategy: Strategy
@@ -212,6 +209,8 @@ def optimize[T](runner: BenchRunner, param: str, search_space: Iterable[T], fixe
         for _, f in tq:
             if f >= 1.0:
                 tq.set_postfix_str(f"{f:.0f}t/s")
+            elif f == 0.0:
+                tq.set_postfix_str("0t/s")
             else:
-                tq.set_postfix_str(f"{1.0/(f + sys.float_info.epsilon):.2f}s/t")
+                tq.set_postfix_str(f"{1.0 / f:.2f}s/t")
         return values[strategy.result()]
