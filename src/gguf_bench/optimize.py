@@ -191,6 +191,7 @@ def optimize[T](
     param: str,
     search_space: Iterable[T],
     fixed_params: Parameters,
+    strat: Literal["auto", "fib", "grid"] = "auto",
 ) -> T:
     values = list(search_space)
     func = CachedFunction[int, float](
@@ -199,7 +200,7 @@ def optimize[T](
 
     strategy: Strategy
     n = len(values)
-    if n <= 3:
+    if strat == "grid" or strat == "auto" and n <= 3:
         strategy = GridStrategy(func.invoke, 0, n - 1)
     else:
         strategy = FibonacciStrategy(func.invoke, 0, n - 1)
