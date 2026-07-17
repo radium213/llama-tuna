@@ -6,7 +6,7 @@ from pathlib import Path
 from contextlib import suppress
 from dataclasses import dataclass, asdict, replace
 from collections.abc import Callable, Iterable
-from typing import Generator, Literal
+from typing import Generator, Literal, Protocol
 from tqdm import tqdm
 
 @dataclass
@@ -62,6 +62,14 @@ class BenchRunner:
         data = csv.DictReader(io.StringIO(result.stdout))
         avg_ts = [float(row["avg_ts"]) for row in data]
         return sum(avg_ts) / len(avg_ts)
+
+
+class Strategy(Protocol):
+    def __iter__(self) -> Generator[tuple[int, float], None, None]:
+        ...
+    
+    def __len__(self) -> int:
+        ...
 
 
 class FibonacciStrategy:
@@ -129,6 +137,33 @@ class FibonacciStrategy:
         return self.k
 
 
+class GridStrategy:
+    func: Callable[[int], float]
+    low: int
+    high: int
+
+    def __init__(self, func: Callable[[int], float], low: int, high: int):
+        self.func = func
+        self.low = low
+        self.high = high
+    
+    def __iter__(self) -> Generator[tuple[int, float], None, None]:
+        func, low, high = self.func, self.low, self.high
+
+        i_max = -1
+        f_max = -1.0
+        for i in range(low, high + 1):
+            f_i = func(i)
+            yield i, f_i
+            if f_i > f_max:
+                i_max = i
+                f_max = f_i
+        yield i_max, f_max
+
+    def __len__(self) -> int:
+        return self.high - self.low + 1
+
+
 class CachedFunction[T, U]:
     func: Callable[[T], U]
     cache: dict[T, U]
@@ -153,7 +188,12 @@ def optimize[T](runner: BenchRunner, param: str, search_space: Iterable[T], fixe
         )
     )
 
-    strategy = FibonacciStrategy(func.invoke, 0, len(values) - 1)
+    strategy: Strategy
+    if len(values) <= 3:
+        strategy = GridStrategy(func.invoke, 0, len(values) - 1)
+    else:
+        strategy = FibonacciStrategy(func.invoke, 0, len(values) - 1)
+
     i_best = 0
     with tqdm(strategy, f"[ {param:>3} ]") as tq:
         tq.set_postfix_str("?t/s")
