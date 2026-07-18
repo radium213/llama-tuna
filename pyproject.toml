@@ -1,5 +1,5 @@
 [project]
-name = "gguf-bench"
+name = "llama-tuna"
 version = "0.0.1"
 description = "Local LLM inference optimizer for llama.cpp."
 readme = "README.md"
@@ -13,4 +13,4 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-gguf-bench = "gguf_bench.main:main"
+llama-tuna = "llama_tuna.main:main"

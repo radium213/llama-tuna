@@ -1,8 +1,8 @@
 import os
 from dataclasses import asdict, replace
-from gguf_bench.config import load_inputs
-from gguf_bench.gguf import read_gguf_metadata, GGUFParsingError
-from gguf_bench.optimize import BenchRunner, Parameters, optimize
+from llama_tuna.config import load_inputs
+from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
+from llama_tuna.optimize import BenchRunner, Parameters, optimize
 
 OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
 
