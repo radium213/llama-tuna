@@ -29,7 +29,8 @@ def main():
     output = ""
     global_t = inputs.params.t
 
-    for file in inputs.files:
+    files_sorted = sorted(inputs.files, key=os.path.getsize)
+    for file in files_sorted:
         try:
             metadata = read_gguf_metadata(file)
         except GGUFParsingError as e:
@@ -55,13 +56,18 @@ def main():
 
         if global_t is None:
             ncpu = os.cpu_count() or 1
-            t = optimize(
-                bench,
-                "t",
-                range(1, ncpu + 1),
-                replace(params, ngl=0),
-            )
-            params.t = global_t = t
+            if ncpu == 1:
+                params.t = global_t = 1
+            else:
+                t = optimize(
+                    bench,
+                    "t",
+                    range(2, ncpu + 1, 2),
+                    replace(params, ngl=0),
+                    "grid",
+                )
+                params.t = global_t = t
+            print(f"Setting -t {global_t} for all models")
 
         if inputs.params.ngl is None:
             layers = metadata.block_count
