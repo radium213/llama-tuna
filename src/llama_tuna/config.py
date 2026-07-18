@@ -181,9 +181,12 @@ def load_inputs() -> Inputs:
             parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
+    out_file: str | None = args.o
+    out_format: str = args.of
+
     kwargs = {
         k: v for k, v in vars(args).items() if k not in ["m", "md", "binary", "o", "of"]
     }
     return Inputs(
-        str(config["binary"]), files, InputParameters(**kwargs), args.o, args.of
+        str(config["binary"]), files, InputParameters(**kwargs), out_file, out_format
     )

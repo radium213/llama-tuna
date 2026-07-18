@@ -1,6 +1,9 @@
 import os
+import io
+import sys
+from typing import TextIO
 from dataclasses import asdict, replace
-from llama_tuna.config import load_inputs
+from llama_tuna.config import Inputs, load_inputs
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
 from llama_tuna.optimize import BenchRunner, Parameters, optimize
 
@@ -24,30 +27,33 @@ def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
     return "\n".join([label] + options) + "\n\n"
 
 
-def main():
-    inputs = load_inputs()
-    output = ""
+def main_loop(inputs: Inputs, output: TextIO):
     global_t = inputs.params.t
 
     files_sorted = sorted(inputs.files, key=os.path.getsize)
-    for file in files_sorted:
+    n_files = len(files_sorted)
+    for i_file, file in enumerate(files_sorted, 1):
+        if n_files > 1:
+            print(f"[File {i_file:>3}/{n_files:>3}] {file.name}")
+        else:
+            print(f"File: {file.name}")
         try:
             metadata = read_gguf_metadata(file)
         except GGUFParsingError as e:
-            print(f"{file} - {e}")
+            print(f"Exception: {e}")
             continue
         if metadata.file_type != "model":
-            print(f"{file} - incompatible type: {metadata.file_type}")
+            print(f'Incompatible type: {metadata.file_type}, expected "model"')
             continue
         if not metadata.architecture or metadata.architecture in [
             "whisper",
             "clip",
             "siglip",
         ]:
-            print(f"{file} - incompatible architecture: {metadata.architecture}")
+            print(f"Excluded architecture: {metadata.architecture}")
             continue
 
-        print(f"{file} - beginning benchmark...")
+        print("Beginning benchmark...")
         bench = BenchRunner(inputs.binary, file)
         params = Parameters(
             **{k: v for k, v in asdict(inputs.params).items() if v is not None}
@@ -67,7 +73,10 @@ def main():
                     "grid",
                 )
                 params.t = global_t = t
-            print(f"Setting -t {global_t} for all models")
+            if n_files > 1:
+                print(f"Continuing with -t {global_t} for all models")
+        else:
+            params.t = global_t
 
         if inputs.params.ngl is None:
             layers = metadata.block_count
@@ -80,15 +89,32 @@ def main():
             params.ngl = ngl
 
         if inputs.out_format == "cli":
-            output += format_cli("llama-server", params)
+            output.write(format_cli("llama-server", params))
         if inputs.out_format == "ini":
-            output += format_ini(str(file), metadata.name, metadata.size_label, params)
+            output.write(format_ini(str(file), metadata.name, metadata.size_label, params))
 
-    if inputs.outfile:
-        with open(inputs.outfile, "w") as f:
-            f.write(output)
-    else:
-        print("\n" + output)
+
+def main():
+    inputs = load_inputs()
+
+    try:
+        if inputs.outfile:
+            try:
+                f = open(inputs.outfile, "x")
+            except OSError as e:
+                sys.exit(str(e))
+            try:
+                main_loop(inputs, f)
+            finally:
+                f.close()
+        else:
+            output = io.StringIO()
+            try:
+                main_loop(inputs, output)
+            finally:
+                print(output.getvalue())
+    except KeyboardInterrupt:
+        sys.exit("Interrupted by user.")
 
 
 if __name__ == "__main__":
