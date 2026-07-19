@@ -1,6 +1,7 @@
 import io
 import subprocess
 import csv
+import math
 from pathlib import Path
 from contextlib import suppress
 from dataclasses import dataclass, asdict, replace
@@ -56,10 +57,17 @@ class BenchRunner:
         )
 
         if result.returncode != 0:
-            return 0.0
-        data = csv.DictReader(io.StringIO(result.stdout))
-        avg_ts = [float(row["avg_ts"]) for row in data]
-        return sum(avg_ts) / len(avg_ts)
+            return math.inf
+
+        def get_results(rows: list[dict[str, str]], filter: str) -> float:
+            r = [row for row in rows if int(row[filter]) > 0]
+            sum_ns = sum([int(row["avg_ns"]) for row in r])
+            return sum_ns / 1e+9
+
+        data: list[dict[str, str]] = list(csv.DictReader(io.StringIO(result.stdout)))
+        pp_s = get_results(data, "n_prompt")
+        tg_s = get_results(data, "n_gen")
+        return pp_s + tg_s
 
 
 class Strategy(Protocol):
@@ -111,7 +119,7 @@ class FibonacciStrategy:
 
         while self.k > 1:
             self.k -= 1
-            if f_a > f_b:
+            if f_a < f_b:
                 high, b, f_b = b, a, f_a
                 a = get_section(2)
                 if a == b and a > low:
@@ -127,7 +135,7 @@ class FibonacciStrategy:
                 yield b, f_b
             fib = (fib[1], fib[2], fib[1] - fib[2])
 
-        if f_a > f_b:
+        if f_a < f_b:
             self._result = a
         else:
             self._result = b
@@ -153,15 +161,15 @@ class GridStrategy:
     def __iter__(self) -> Generator[tuple[int, float], None, None]:
         func, low, high = self.func, self.low, self.high
 
-        i_max = -1
-        f_max = -1.0
+        i_min = 0
+        f_min = math.inf
         for i in range(low, high + 1):
             f_i = func(i)
             yield i, f_i
-            if f_i > f_max:
-                i_max = i
-                f_max = f_i
-        self._result = i_max
+            if f_i < f_min:
+                i_min = i
+                f_min = f_i
+        self._result = i_min
 
     def __len__(self) -> int:
         return self.high - self.low + 1
@@ -194,9 +202,11 @@ def optimize[T](
     strat: Literal["auto", "fib", "grid"] = "auto",
 ) -> T:
     values = list(search_space)
-    func = CachedFunction[int, float](
-        lambda i: runner.run_test(replace(fixed_params, **{param: values[i]}))
-    )
+
+    def run(i: int) -> float:
+        return runner.run_test(replace(fixed_params, **{param: values[i]}))
+
+    func: CachedFunction[int, float] = CachedFunction(run)
 
     strategy: Strategy
     n = len(values)
@@ -207,11 +217,18 @@ def optimize[T](
 
     with tqdm(strategy, f"[ {param:>3} ]") as tq:
         tq.set_postfix_str("?t/s")
-        for _, f in tq:
-            if f >= 1.0:
-                tq.set_postfix_str(f"{f:.0f}t/s")
-            elif f == 0.0:
+        total_s = 0.0
+        total_tok = 0
+        tok_step = fixed_params.p + fixed_params.n
+        for _, s in tq:
+            if s < math.inf:
+                total_s += s
+                total_tok += tok_step
+            rate = total_tok / total_s if total_s != 0.0 else 0.0
+            if rate >= 1.0:
+                tq.set_postfix_str(f"{rate:.0f}t/s")
+            elif rate == 0.0:
                 tq.set_postfix_str("0t/s")
             else:
-                tq.set_postfix_str(f"{1.0 / f:.2f}s/t")
+                tq.set_postfix_str(f"{1.0 / rate:.2f}s/t")
         return values[strategy.result()]

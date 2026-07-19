@@ -58,7 +58,6 @@ def main_loop(inputs: Inputs, output: TextIO):
         params = Parameters(
             **{k: v for k, v in asdict(inputs.params).items() if v is not None}
         )
-        params.n = 0
 
         if global_t is None:
             ncpu = os.cpu_count() or 1
