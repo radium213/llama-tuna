@@ -2,6 +2,7 @@ import io
 import subprocess
 import csv
 import math
+from functools import cache
 from pathlib import Path
 from contextlib import suppress
 from dataclasses import dataclass, asdict, replace
@@ -178,22 +179,6 @@ class GridStrategy:
         return self._result
 
 
-class CachedFunction[T, U]:
-    func: Callable[[T], U]
-    cache: dict[T, U]
-
-    def __init__(self, func: Callable[[T], U]):
-        self.func = func
-        self.cache = {}
-
-    def invoke(self, x: T) -> U:
-        result = self.cache.get(x, None)
-        if result is None:
-            result = self.func(x)
-            self.cache[x] = result
-        return result
-
-
 def optimize[T](
     runner: BenchRunner,
     param: str,
@@ -206,14 +191,14 @@ def optimize[T](
     def run(i: int) -> float:
         return runner.run_test(replace(fixed_params, **{param: values[i]}))
 
-    func: CachedFunction[int, float] = CachedFunction(run)
+    func = cache(run)
 
     strategy: Strategy
     n = len(values)
     if strat == "grid" or strat == "auto" and n <= 3:
-        strategy = GridStrategy(func.invoke, 0, n - 1)
+        strategy = GridStrategy(func, 0, n - 1)
     else:
-        strategy = FibonacciStrategy(func.invoke, 0, n - 1)
+        strategy = FibonacciStrategy(func, 0, n - 1)
 
     with tqdm(strategy, f"[ {param:>3} ]") as tq:
         tq.set_postfix_str("?t/s")
