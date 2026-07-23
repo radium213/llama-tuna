@@ -101,7 +101,7 @@ class FibonacciStrategy:
         self.k = k
 
     def __iter__(self) -> Generator[tuple[int, float], None, None]:
-        func, fib, low, high = self.func, self.fib, self.low, self.high
+        func, low, high, fib, k = self.func, self.low, self.high, self.fib, self.k
 
         def get_section(i: int) -> int:
             return int(round(low + fib[i] / fib[0] * (high - low)))
@@ -111,15 +111,15 @@ class FibonacciStrategy:
         if a == b:
             a -= 1
 
-        self.k -= 1
+        k -= 1
         f_a = func(a)
         yield a, f_a
-        self.k -= 1
+        k -= 1
         f_b = func(b)
         yield b, f_b
 
-        while self.k > 1:
-            self.k -= 1
+        while k > 1:
+            k -= 1
             if f_a < f_b:
                 high, b, f_b = b, a, f_a
                 a = get_section(2)
