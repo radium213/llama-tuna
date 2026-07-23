@@ -179,6 +179,10 @@ class GridStrategy:
         return self._result
 
 
+class OptimizeFailure(Exception):
+    """Failure to find any valid value."""
+
+
 def optimize[T](
     runner: BenchRunner,
     param: str,
@@ -202,10 +206,13 @@ def optimize[T](
 
     with tqdm(strategy, f"[ {param:>3} ]") as tq:
         tq.set_postfix_str("?t/s")
+        min_s = math.inf
+
         total_s = 0.0
         total_tok = 0
         tok_step = fixed_params.p + fixed_params.n
         for _, s in tq:
+            min_s = min(min_s, s)
             if s < math.inf:
                 total_s += s
                 total_tok += tok_step
@@ -216,4 +223,7 @@ def optimize[T](
                 tq.set_postfix_str("0t/s")
             else:
                 tq.set_postfix_str(f"{1.0 / rate:.2f}s/t")
+
+        if min_s == math.inf:
+            raise OptimizeFailure("All parameter values fail")
         return values[strategy.result()]

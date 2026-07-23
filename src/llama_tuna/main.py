@@ -5,7 +5,7 @@ from typing import TextIO
 from dataclasses import asdict, replace
 from llama_tuna.config import Inputs, load_inputs
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
-from llama_tuna.optimize import BenchRunner, Parameters, optimize
+from llama_tuna.optimize import BenchRunner, OptimizeFailure, Parameters, optimize
 
 OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
 
@@ -61,17 +61,19 @@ def main_loop(inputs: Inputs, output: TextIO):
 
         if global_t is None:
             ncpu = os.cpu_count() or 1
-            if ncpu == 1:
-                params.t = global_t = 1
-            else:
+            t_range = range(1) if ncpu == 1 else range(2, ncpu + 1, 2)
+            try:
                 t = optimize(
                     bench,
                     "t",
-                    range(2, ncpu + 1, 2),
+                    t_range,
                     replace(params, ngl=0),
                     "grid",
                 )
                 params.t = global_t = t
+            except OptimizeFailure as e:
+                print(e)
+                continue
             if n_files > 1:
                 print(f"Continuing with -t {global_t} for all models")
         else:
@@ -79,13 +81,17 @@ def main_loop(inputs: Inputs, output: TextIO):
 
         if inputs.params.ngl is None:
             layers = metadata.block_count
-            ngl = optimize(
-                bench,
-                "ngl",
-                range(0, layers + 1),
-                params
-            )
-            params.ngl = ngl
+            try:
+                ngl = optimize(
+                    bench,
+                    "ngl",
+                    range(0, layers + 1),
+                    params
+                )
+                params.ngl = ngl
+            except OptimizeFailure as e:
+                print(e)
+                continue
 
         if inputs.out_format == "cli":
             output.write(format_cli("llama-server", params))
