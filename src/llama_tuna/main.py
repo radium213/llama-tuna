@@ -2,7 +2,7 @@ import os
 import io
 import sys
 import math
-from typing import Literal, TextIO
+from typing import Literal
 from collections.abc import Iterable
 from dataclasses import asdict, replace
 from llama_tuna.config import Inputs, load_inputs
@@ -39,7 +39,7 @@ def optimize[T](
 ):
     opt = Optimizer(runner, param, search_space, fixed_params, strat)
 
-    with tqdm(opt, f"[ {param:>3} ]") as tq:
+    with tqdm(opt, f"[ {param:>3} ]", disable=None) as tq:
         tq.set_postfix_str("?t/s")
 
         total_s = 0.0
@@ -60,7 +60,7 @@ def optimize[T](
     return opt.result()
 
 
-def main_loop(inputs: Inputs, output: TextIO):
+def main_loop(inputs: Inputs, output: io.TextIOBase):
     global_t = inputs.params.t
 
     files_sorted = sorted(inputs.files, key=os.path.getsize)
@@ -145,6 +145,8 @@ def main():
                 main_loop(inputs, f)
             finally:
                 f.close()
+        elif isinstance(sys.stdout, io.TextIOBase) and not sys.stdout.isatty():
+            main_loop(inputs, sys.stdout)
         else:
             output = io.StringIO()
             try:
