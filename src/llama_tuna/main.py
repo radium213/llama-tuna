@@ -2,6 +2,7 @@ import os
 import io
 import sys
 import math
+import logging
 from typing import Literal
 from collections.abc import Iterable
 from dataclasses import asdict, replace
@@ -9,6 +10,17 @@ from llama_tuna.config import Inputs, load_inputs
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
 from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure, Parameters
 from tqdm import tqdm
+
+
+class DefaultFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        msg = record.getMessage()
+        if record.levelno >= logging.ERROR:
+            return f"Error: {msg}"
+        elif record.levelno >= logging.WARNING:
+            return f"Warning: {msg}"
+        return msg
+
 
 OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
 
@@ -56,7 +68,7 @@ def optimize[T](
                 tq.set_postfix_str("0t/s")
             else:
                 tq.set_postfix_str(f"{1.0 / rate:.2f}s/t")
-    
+
     return opt.result()
 
 
@@ -67,26 +79,25 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
     n_files = len(files_sorted)
     for i_file, file in enumerate(files_sorted, 1):
         if n_files > 1:
-            print(f"[File {i_file:>3}/{n_files:>3}] {file.name}")
+            logging.info(f"[{i_file:>3}/{n_files:>3}] {file.name}")
         else:
-            print(f"File: {file.name}")
+            logging.info(f"[---/---] {file.name}")
         try:
             metadata = read_gguf_metadata(file)
         except GGUFParsingError as e:
-            print(f"Exception: {e}")
+            logging.error(e)
             continue
         if metadata.file_type != "model":
-            print(f'Incompatible type: {metadata.file_type}, expected "model"')
+            logging.warning(f'Incompatible type: {metadata.file_type}, expected "model"')
             continue
         if not metadata.architecture or metadata.architecture in [
             "whisper",
             "clip",
             "siglip",
         ]:
-            print(f"Excluded architecture: {metadata.architecture}")
+            logging.warning(f"Excluded architecture: {metadata.architecture}")
             continue
 
-        print("Beginning benchmark...")
         bench = BenchRunner(inputs.binary, file)
         params = Parameters(
             **{k: v for k, v in asdict(inputs.params).items() if v is not None}
@@ -105,25 +116,20 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
                 )
                 params.t = global_t = t
             except OptimizeFailure as e:
-                print(e)
+                logging.error(e)
                 continue
             if n_files > 1:
-                print(f"Continuing with -t {global_t} for all models")
+                logging.info(f"Continuing with -t {global_t} for all models")
         else:
             params.t = global_t
 
         if inputs.params.ngl is None:
             layers = metadata.block_count
             try:
-                ngl = optimize(
-                    bench,
-                    "ngl",
-                    range(0, layers + 1),
-                    params
-                )
+                ngl = optimize(bench, "ngl", range(0, layers + 1), params)
                 params.ngl = ngl
             except OptimizeFailure as e:
-                print(e)
+                logging.error(e)
                 continue
 
         if inputs.out_format == "cli":
@@ -134,6 +140,10 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
 
 def main():
     inputs = load_inputs()
+
+    log_handler = logging.StreamHandler()
+    log_handler.setFormatter(DefaultFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[log_handler])
 
     try:
         if inputs.outfile:
