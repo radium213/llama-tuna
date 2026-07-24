@@ -1,11 +1,14 @@
 import os
 import io
 import sys
-from typing import TextIO
+import math
+from typing import Literal, TextIO
+from collections.abc import Iterable
 from dataclasses import asdict, replace
 from llama_tuna.config import Inputs, load_inputs
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
-from llama_tuna.optimize import BenchRunner, OptimizeFailure, Parameters, optimize
+from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure, Parameters
+from tqdm import tqdm
 
 OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
 
@@ -25,6 +28,36 @@ def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
         if k in OPTIONS_INCLUDE:
             options.append(f"{k} = {v}")
     return "\n".join([label] + options) + "\n\n"
+
+
+def optimize[T](
+    runner: BenchRunner,
+    param: str,
+    search_space: Iterable[T],
+    fixed_params: Parameters,
+    strat: Literal["auto", "fib", "grid"] = "auto",
+):
+    opt = Optimizer(runner, param, search_space, fixed_params, strat)
+
+    with tqdm(opt, f"[ {param:>3} ]") as tq:
+        tq.set_postfix_str("?t/s")
+
+        total_s = 0.0
+        total_tok = 0
+        tok_step = fixed_params.p + fixed_params.n
+        for s in tq:
+            if s < math.inf:
+                total_s += s
+                total_tok += tok_step
+            rate = total_tok / total_s if total_s != 0.0 else 0.0
+            if rate >= 1.0:
+                tq.set_postfix_str(f"{rate:.0f}t/s")
+            elif rate == 0.0:
+                tq.set_postfix_str("0t/s")
+            else:
+                tq.set_postfix_str(f"{1.0 / rate:.2f}s/t")
+    
+    return opt.result()
 
 
 def main_loop(inputs: Inputs, output: TextIO):

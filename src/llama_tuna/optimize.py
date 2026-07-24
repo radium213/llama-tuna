@@ -8,7 +8,6 @@ from contextlib import suppress
 from dataclasses import dataclass, asdict, replace
 from collections.abc import Callable, Iterable
 from typing import Generator, Literal, Protocol
-from tqdm import tqdm
 
 
 @dataclass
@@ -41,7 +40,7 @@ class BenchRunner:
         if no_warmup:
             self.options.append("--no-warmup")
 
-    def run_test(self, params: Parameters) -> float:
+    def __call__(self, params: Parameters) -> float:
         options: list[str] = []
         for k, v in asdict(params).items():
             if v is not None:
@@ -63,7 +62,7 @@ class BenchRunner:
         def get_results(rows: list[dict[str, str]], filter: str) -> float:
             r = [row for row in rows if int(row[filter]) > 0]
             sum_ns = sum([int(row["avg_ns"]) for row in r])
-            return sum_ns / 1e+9
+            return sum_ns / 1e9
 
         data: list[dict[str, str]] = list(csv.DictReader(io.StringIO(result.stdout)))
         pp_s = get_results(data, "n_prompt")
@@ -183,47 +182,45 @@ class OptimizeFailure(Exception):
     """Failure to find any valid value."""
 
 
-def optimize[T](
-    runner: BenchRunner,
-    param: str,
-    search_space: Iterable[T],
-    fixed_params: Parameters,
-    strat: Literal["auto", "fib", "grid"] = "auto",
-) -> T:
-    values = list(search_space)
-
-    def run(i: int) -> float:
-        return runner.run_test(replace(fixed_params, **{param: values[i]}))
-
-    func = cache(run)
-
+class Optimizer[T]:
+    values: list[T]
     strategy: Strategy
-    n = len(values)
-    if strat == "grid" or strat == "auto" and n <= 3:
-        strategy = GridStrategy(func, 0, n - 1)
-    else:
-        strategy = FibonacciStrategy(func, 0, n - 1)
+    _result: T
 
-    with tqdm(strategy, f"[ {param:>3} ]") as tq:
-        tq.set_postfix_str("?t/s")
+    def __init__(
+        self,
+        runner: BenchRunner,
+        param: str,
+        search_space: Iterable[T],
+        fixed_params: Parameters,
+        strat: Literal["auto", "fib", "grid"] = "auto",
+    ):
+        values = list(search_space)
+        self.values = values
+
+        def run(i: int) -> float:
+            return runner(replace(fixed_params, **{param: values[i]}))
+
+        func = cache(run)
+
+        n = len(values)
+        if strat == "grid" or strat == "auto" and n <= 3:
+            self.strategy = GridStrategy(func, 0, n - 1)
+        else:
+            self.strategy = FibonacciStrategy(func, 0, n - 1)
+
+    def __iter__(self) -> Generator[float, None, None]:
         min_s = math.inf
-
-        total_s = 0.0
-        total_tok = 0
-        tok_step = fixed_params.p + fixed_params.n
-        for _, s in tq:
+        for _, s in self.strategy:
             min_s = min(min_s, s)
-            if s < math.inf:
-                total_s += s
-                total_tok += tok_step
-            rate = total_tok / total_s if total_s != 0.0 else 0.0
-            if rate >= 1.0:
-                tq.set_postfix_str(f"{rate:.0f}t/s")
-            elif rate == 0.0:
-                tq.set_postfix_str("0t/s")
-            else:
-                tq.set_postfix_str(f"{1.0 / rate:.2f}s/t")
+            yield s
 
         if min_s == math.inf:
             raise OptimizeFailure("All parameter values fail")
-        return values[strategy.result()]
+        self._result = self.values[self.strategy.result()]
+
+    def __len__(self) -> int:
+        return len(self.strategy)
+
+    def result(self) -> T:
+        return self._result
