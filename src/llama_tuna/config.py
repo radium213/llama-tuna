@@ -2,7 +2,7 @@ import argparse
 import os
 import shutil
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 
 @dataclass
@@ -174,8 +174,9 @@ def load_inputs() -> Inputs:
             parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
+    param_fields = [f.name for f in fields(InputParameters)]
     kwargs = {
-        k: v for k, v in vars(args).items() if k not in ["m", "md", "binary", "o"]
+        k: v for k, v in vars(args).items() if k in param_fields
     }
     return Inputs(
         str(config["binary"]), files, InputParameters(**kwargs), args.o
