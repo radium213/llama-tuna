@@ -5,7 +5,7 @@ import math
 import logging
 from typing import Literal
 from collections.abc import Iterable
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 from llama_tuna.config import Inputs, load_inputs
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
 from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure, Parameters
@@ -40,6 +40,19 @@ def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
         if k in OPTIONS_INCLUDE:
             options.append(f"{k} = {v}")
     return "\n".join([label] + options) + "\n\n"
+
+
+def warmup(runner: BenchRunner, params: Parameters, ctx: int, model: str):
+    tq = tqdm(total=1, desc="[ /// ]")
+    result = runner(replace(params, ngl=-1, p=4, n=2))
+    if result == math.inf:
+        ctx_k = ctx // 1000
+        ctx_str = str(ctx_k) + "k" if ctx_k > 0 else str(ctx)
+        tq.close()
+        raise Exception(f"Could not run {model} with {ctx_str} context")
+    else:
+        tq.update()
+        tq.close()
 
 
 def optimize[T](
@@ -99,9 +112,21 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
             continue
 
         bench = BenchRunner(inputs.binary, file)
+        _param_keys = [f.name for f in fields(Parameters)]
         params = Parameters(
-            **{k: v for k, v in asdict(inputs.params).items() if v is not None}
+            **{k: v for k, v in asdict(inputs.params).items() if k in _param_keys and v is not None}
         )
+
+        min_ctx = params.p + params.n
+        req_ctx = inputs.params.c if inputs.params.c is not None else metadata.context_length
+        ctx = max(min(req_ctx, metadata.context_length), min_ctx)
+        params.d = ctx - min_ctx
+
+        try:
+            warmup(BenchRunner(inputs.binary, file, 1), params, ctx, file.name)
+        except Exception as e:
+            logging.error(e)
+            continue
 
         if global_t is None:
             ncpu = os.cpu_count() or 1
@@ -111,7 +136,7 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
                     bench,
                     "t",
                     t_range,
-                    replace(params, ngl=0),
+                    replace(params, ngl=0, d=0),
                     "grid",
                 )
                 params.t = global_t = t

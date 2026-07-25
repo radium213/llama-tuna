@@ -10,7 +10,7 @@ class InputParameters:
     fa: str | None = None
     ctk: str | None = None
     ctv: str | None = None
-    d: int | None = None
+    c: int | None = None
     t: int | None = None
     ngl: int | None = None
     b: int | None = None
@@ -62,10 +62,10 @@ def create_arg_parser() -> argparse.ArgumentParser:
         help="cache type V",
     )
     group_global.add_argument(
-        "-d",
+        "-c",
         type=int,
-        metavar="depth",
-        help="context depth for test",
+        metavar="context",
+        help="desired context length, default: model max",
     )
     group_global.add_argument(
         "-b",
