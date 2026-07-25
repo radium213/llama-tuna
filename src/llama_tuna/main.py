@@ -146,16 +146,7 @@ def main():
     logging.basicConfig(level=logging.INFO, handlers=[log_handler])
 
     try:
-        if inputs.outfile:
-            try:
-                f = open(inputs.outfile, "x")
-            except OSError as e:
-                sys.exit(str(e))
-            try:
-                main_loop(inputs, f)
-            finally:
-                f.close()
-        elif isinstance(sys.stdout, io.TextIOBase) and not sys.stdout.isatty():
+        if isinstance(sys.stdout, io.TextIOBase) and not sys.stdout.isatty():
             main_loop(inputs, sys.stdout)
         else:
             output = io.StringIO()

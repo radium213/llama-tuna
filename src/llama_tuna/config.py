@@ -22,7 +22,6 @@ class Inputs:
     binary: str
     files: list[Path]
     params: InputParameters
-    outfile: str | None
     out_format: str
 
 
@@ -82,12 +81,6 @@ def create_arg_parser() -> argparse.ArgumentParser:
     )
     group_global.add_argument(
         "-o",
-        type=str,
-        metavar="filename",
-        help="output file",
-    )
-    group_global.add_argument(
-        "-of",
         type=str,
         choices=["cli", "ini"],
         help="output format: llama-server CLI string or ini",
@@ -181,12 +174,9 @@ def load_inputs() -> Inputs:
             parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
-    out_file: str | None = args.o
-    out_format: str = args.of
-
     kwargs = {
-        k: v for k, v in vars(args).items() if k not in ["m", "md", "binary", "o", "of"]
+        k: v for k, v in vars(args).items() if k not in ["m", "md", "binary", "o"]
     }
     return Inputs(
-        str(config["binary"]), files, InputParameters(**kwargs), out_file, out_format
+        str(config["binary"]), files, InputParameters(**kwargs), args.o
     )
