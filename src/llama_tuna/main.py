@@ -101,7 +101,7 @@ def format_cli(command: str, params: Parameters, ctx: int) -> str:
     for k, v in asdict(params).items():
         if k in OPTIONS_INCLUDE:
             options.extend([f"-{k}", str(v)])
-    return " ".join([command] + options) + f"-c {ctx}\n"
+    return " ".join([command] + options) + f" -c {ctx}\n"
 
 
 def format_ini(file: str, name: str, sizelabel: str, params: Parameters, ctx: int) -> str:
@@ -153,7 +153,7 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
 
         if global_t is None:
             ncpu = os.cpu_count() or 1
-            t_range = range(1) if ncpu == 1 else range(2, ncpu + 1, 2)
+            t_range = [1] if ncpu == 1 else range(2, ncpu + 1, 2)
             try:
                 t = optimize(
                     bench,
