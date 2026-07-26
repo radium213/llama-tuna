@@ -10,11 +10,14 @@ from collections.abc import Callable, Iterable
 from typing import Generator, Literal, Protocol
 
 
+Quant = Literal["f16", "q8_0", "q4_0"]
+
+
 @dataclass
 class Parameters:
     fa: Literal["on", "off"] = "on"
-    ctk: Literal["f16", "q8_0", "q4_0"] = "f16"
-    ctv: Literal["f16", "q8_0", "q4_0"] = "f16"
+    ctk: Quant = "f16"
+    ctv: Quant = "f16"
     d: int = 0
     p: int = 512
     n: int = 128

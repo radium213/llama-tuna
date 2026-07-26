@@ -4,11 +4,12 @@ import sys
 import math
 import logging
 from typing import Literal
+from pathlib import Path
 from collections.abc import Iterable
 from dataclasses import asdict, fields, replace
 from llama_tuna.config import Inputs, load_inputs
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
-from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure, Parameters
+from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure, Parameters, Quant
 from tqdm import tqdm
 
 
@@ -42,14 +43,17 @@ def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
     return "\n".join([label] + options) + "\n\n"
 
 
-def warmup(runner: BenchRunner, params: Parameters, ctx: int, model: str):
+class TestFailure(Exception):
+    """Failure to run the model"""
+
+
+def smoke_test(binary: str, model: Path, params: Parameters):
     tq = tqdm(total=1, desc="[ /// ]")
-    result = runner(replace(params, ngl=-1, p=4, n=2))
+    runner = BenchRunner(binary, model, 1, True)
+    result = runner(replace(params, ngl=0, d=0, p=4, n=2))
     if result == math.inf:
-        ctx_k = ctx // 1000
-        ctx_str = str(ctx_k) + "k" if ctx_k > 0 else str(ctx)
         tq.close()
-        raise Exception(f"Could not run {model} with {ctx_str} context")
+        raise TestFailure(f"Could not run {model.name}")
     else:
         tq.update()
         tq.close()
@@ -85,6 +89,30 @@ def optimize[T](
     return opt.result()
 
 
+def fit_context(runner: BenchRunner, params: Parameters, ctx: int) -> tuple[Quant, Quant]:
+    params.d = max(ctx - params.p - params.n, 0)
+    search_space: list[tuple[Quant, Quant]] = [
+        ("f16", "f16"),
+        ("f16", "q8_0"),
+        ("f16", "q4_0"),
+        ("q8_0", "q8_0"),
+        ("q8_0", "q4_0"),
+        ("q4_0", "q4_0"),
+    ]
+    tq = tqdm(search_space, "[ ctx ]")
+    for ctk, ctv in tq:
+        params.ctk = ctk
+        params.ctv = ctv
+        result = runner(params)
+        if result < math.inf:
+            tq.update(tq.total - tq.n)
+            tq.close()
+            return ctk, ctv
+    ctx_k = ctx // 1000
+    ctx_str = str(ctx_k) + "k" if ctx_k > 0 else str(ctx)
+    raise TestFailure(f"Failed to fit {ctx_str} context")
+
+
 def main_loop(inputs: Inputs, output: io.TextIOBase):
     global_t = inputs.params.t
 
@@ -117,14 +145,9 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
             **{k: v for k, v in asdict(inputs.params).items() if k in _param_keys and v is not None}
         )
 
-        min_ctx = params.p + params.n
-        req_ctx = inputs.params.c if inputs.params.c is not None else metadata.context_length
-        ctx = max(min(req_ctx, metadata.context_length), min_ctx)
-        params.d = ctx - min_ctx
-
         try:
-            warmup(BenchRunner(inputs.binary, file, 1), params, ctx, file.name)
-        except Exception as e:
+            smoke_test(inputs.binary, file, params)
+        except TestFailure as e:
             logging.error(e)
             continue
 
@@ -156,6 +179,17 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
             except OptimizeFailure as e:
                 logging.error(e)
                 continue
+
+        min_ctx = params.p + params.n
+        req_ctx = inputs.params.c if inputs.params.c is not None else metadata.context_length
+        ctx = max(min(req_ctx, metadata.context_length), min_ctx)
+        try:
+            ctk, ctv = fit_context(bench, params, ctx)
+            params.ctk = ctk
+            params.ctv = ctv
+        except TestFailure as e:
+            logging.error(e)
+            continue
 
         if inputs.out_format == "cli":
             output.write(format_cli("llama-server", params))
