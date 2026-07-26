@@ -23,26 +23,6 @@ class DefaultFormatter(logging.Formatter):
         return msg
 
 
-OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
-
-
-def format_cli(command: str, params: Parameters) -> str:
-    options: list[str] = []
-    for k, v in asdict(params).items():
-        if k in OPTIONS_INCLUDE:
-            options.extend([f"-{k}", str(v)])
-    return " ".join([command] + options) + "\n"
-
-
-def format_ini(file: str, name: str, sizelabel: str, params: Parameters) -> str:
-    label = f"[{name}-{sizelabel}]"
-    options: list[str] = [f"model = {file}"]
-    for k, v in asdict(params).items():
-        if k in OPTIONS_INCLUDE:
-            options.append(f"{k} = {v}")
-    return "\n".join([label] + options) + "\n\n"
-
-
 class TestFailure(Exception):
     """Failure to run the model"""
 
@@ -111,6 +91,26 @@ def fit_context(runner: BenchRunner, params: Parameters, ctx: int) -> tuple[Quan
     ctx_k = ctx // 1000
     ctx_str = str(ctx_k) + "k" if ctx_k > 0 else str(ctx)
     raise TestFailure(f"Failed to fit {ctx_str} context")
+
+
+OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
+
+
+def format_cli(command: str, params: Parameters, ctx: int) -> str:
+    options: list[str] = []
+    for k, v in asdict(params).items():
+        if k in OPTIONS_INCLUDE:
+            options.extend([f"-{k}", str(v)])
+    return " ".join([command] + options) + f"-c {ctx}\n"
+
+
+def format_ini(file: str, name: str, sizelabel: str, params: Parameters, ctx: int) -> str:
+    label: str = f"[{name}-{sizelabel}]"
+    options: list[str] = [f"model = {file}"]
+    for k, v in asdict(params).items():
+        if k in OPTIONS_INCLUDE:
+            options.append(f"{k} = {v}")
+    return "\n".join([label] + options) + f"\nc = {ctx}\n\n"
 
 
 def main_loop(inputs: Inputs, output: io.TextIOBase):
@@ -192,9 +192,9 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
             continue
 
         if inputs.out_format == "cli":
-            output.write(format_cli("llama-server", params))
+            output.write(format_cli("llama-server", params, ctx))
         if inputs.out_format == "ini":
-            output.write(format_ini(str(file), metadata.name, metadata.size_label, params))
+            output.write(format_ini(str(file), metadata.name, metadata.size_label, params, ctx))
 
 
 def main():
