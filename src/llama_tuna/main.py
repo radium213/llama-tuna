@@ -3,7 +3,7 @@ import io
 import sys
 import math
 import logging
-from typing import Literal
+from typing import Literal, TypeGuard, get_args
 from pathlib import Path
 from collections.abc import Iterable
 from dataclasses import asdict, fields, replace
@@ -69,16 +69,8 @@ def optimize[T](
     return opt.result()
 
 
-def fit_context(runner: BenchRunner, params: Parameters, ctx: int) -> tuple[Quant, Quant]:
+def fit_context(runner: BenchRunner, params: Parameters, search_space: list[tuple[Quant, Quant]], ctx: int) -> tuple[Quant, Quant]:
     params.d = max(ctx - params.p - params.n, 0)
-    search_space: list[tuple[Quant, Quant]] = [
-        ("f16", "f16"),
-        ("f16", "q8_0"),
-        ("f16", "q4_0"),
-        ("q8_0", "q8_0"),
-        ("q8_0", "q4_0"),
-        ("q4_0", "q4_0"),
-    ]
     tq = tqdm(search_space, "[ ctx ]")
     for ctk, ctv in tq:
         params.ctk = ctk
@@ -183,8 +175,45 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
         min_ctx = params.p + params.n
         req_ctx = inputs.params.c if inputs.params.c is not None else metadata.context_length
         ctx = max(min(req_ctx, metadata.context_length), min_ctx)
+        if ctx != req_ctx:
+            logging.warning(f"Context clamped to {ctx}")
+        search_space: list[tuple[Quant, Quant]] = []
+        if inputs.params.fa == "off":
+            search_space = [
+                ("f16", "f16"),
+            ]
+        else:
+            ctk = inputs.params.ctk
+            ctv = inputs.params.ctv
+            def is_quant(s: str | None) -> TypeGuard[Quant]:
+                return s in get_args(Quant)
+            if is_quant(ctk) and is_quant(ctv):
+                search_space = [
+                    (ctk, ctv),
+                ]
+            elif is_quant(ctk):
+                search_space = [
+                    (ctk, "f16"),
+                    (ctk, "q8_0"),
+                    (ctk, "q4_0"),
+                ]
+            elif is_quant(ctv):
+                search_space = [
+                    ("f16", ctv),
+                    ("q8_0", ctv),
+                    ("q4_0", ctv),
+                ]
+            else:
+                search_space = [
+                    ("f16", "f16"),
+                    ("f16", "q8_0"),
+                    ("f16", "q4_0"),
+                    ("q8_0", "q8_0"),
+                    ("q8_0", "q4_0"),
+                    ("q4_0", "q4_0"),
+                ]
         try:
-            ctk, ctv = fit_context(bench, params, ctx)
+            ctk, ctv = fit_context(BenchRunner(inputs.binary, file, 1), params, search_space, ctx)
             params.ctk = ctk
             params.ctv = ctv
         except TestFailure as e:
