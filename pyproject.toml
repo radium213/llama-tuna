@@ -1,12 +1,23 @@
 [project]
 name = "llama-tuna"
-version = "0.0.1"
-description = "Local LLM inference optimizer for llama.cpp."
+version = "0.1.0"
+description = "Local LLM inference optimizer for llama-server"
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
-requires-python = ">=3.14"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+]
+requires-python = ">=3.12"
 dependencies = [
     "tqdm>=4.68.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/radium213/llama-tuna"
+Documentation = "https://github.com/radium213/llama-tuna/blob/main/README.md"
+Repository = "https://github.com/radium213/llama-tuna.git"
+Issues = "https://github.com/radium213/llama-tuna/issues"
 
 [build-system]
 requires = ["setuptools>=61"]
