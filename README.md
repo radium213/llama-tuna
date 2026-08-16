@@ -1,6 +1,18 @@
-...brief description
+# llama-tuna
+
+`llama-tuna` is a local LLM inference tuner for `llama.cpp`. It benchmarks GGUF models using `llama-bench` and `llama-cli` to automatically discover optimal runtime parameters for your hardware.
 
 ## Installation
+
+### Requirements
+- python >= 3.12
+- llama.cpp
+
+You can install `llama-tuna` using [uv](https://github.com/astral-sh/uv):
+
+```bash
+uv tool install git+https://github.com/radium213/llama-tuna
+```
 
 ## Usage
 
@@ -10,20 +22,20 @@ Run the benchmark sequence on a single model...
 llama-tuna -m ~/models/llama-3.1-8B.gguf
 ```
 
-...or a directory with multiple models.
+...or across a directory containing multiple GGUF models.
 
 ```bash
 llama-tuna -md ~/models
 ```
 
-By default `llama-tuna` tests the models near their maximum context size, which can be very slow.
+By default `llama-tuna` tests models near their maximum context size, which can be very slow.
 It's best to specify your desired context size explicitly.
 
 ```bash
 llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384
 ```
 
-Found parameters can be output as either a llama-server CLI string...
+Found parameters can be output as either a `llama-server` CLI string...
 
 ```bash
 llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384 -o cli
@@ -33,7 +45,7 @@ llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384 -o cli
 llama-server -fa on -ctk f16 -ctv f16 -t 4 -ngl 32 -b 2048 -ub 512 -c 16384
 ```
 
-...or text that can be piped to a models.ini file.
+...or text that can be piped into a `models.ini` file.
 
 ```bash
 llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384 -o ini > models.ini
@@ -85,14 +97,9 @@ test parameters:
 
 ## Environment Variables
 
-Some options can be provided by setting an environment variable. CLI options take precedence if both are provided
+Some options can be provided by setting environment variables. CLI options take precedence if both are provided.
 
 | Variable | Description |
 |---|---|
 | `LLAMA_BENCH` | path to the `llama-bench` binary |
 | `MODELS_DIR` | directory containing GGUF models |
-
-## Limitations
-
-- Only GGUF v[2,3] models are supported.
-- ...
