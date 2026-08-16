@@ -1,5 +1,4 @@
 import argparse
-import os
 import shutil
 from pathlib import Path
 from dataclasses import dataclass, fields
@@ -19,7 +18,7 @@ class InputParameters:
 
 @dataclass
 class Inputs:
-    binary: str
+    llama_path: Path
     files: list[Path]
     params: InputParameters
     out_format: str
@@ -87,11 +86,11 @@ def create_arg_parser() -> argparse.ArgumentParser:
         default="cli",
     )
     group_global.add_argument(
-        "--llama-bench",
+        "--llama-cpp-path",
         type=str,
         metavar="path",
-        help="path to llama-bench binary",
-        dest="binary",
+        help="path to llama.cpp binaries",
+        dest="llama_path",
     )
     group_test = parser.add_argument_group(
         "test parameters", "if supplied, will not be searched for"
@@ -115,39 +114,21 @@ def load_inputs() -> Inputs:
     parser = create_arg_parser()
     args = parser.parse_args()
 
-    default_config: dict[str, str | None] = {
-        "binary": "llama-bench",
-        "md": None,
-    }
-    env_config: dict[str, str | None] = {
-        "binary": os.environ.get("LLAMA_BENCH", None),
-        "md": os.environ.get("MODELS_DIR", None),
-    }
-    cli_config: dict[str, str | None] = {
-        "binary": args.binary,
-        "md": args.md,
-    }
-
-    def strip_none(d: dict[str, str | None]) -> dict[str, str]:
-        return {k: v for k, v in d.items() if v is not None}
-
-    config: dict[str, str | None] = (
-        default_config | strip_none(env_config) | strip_none(cli_config)
-    )
-
-    binary: str | None = config["binary"]
-
-    if binary is None or (not shutil.which(binary) and not Path(binary).exists()):
-        parser.error(
-            "llama-bench not found, make sure it's in PATH, or supply the path with either --llama-bench or the LLAMA_BENCH env var."
-        )
+    def validate_dependency(cmd: str):
+        if not shutil.which(cmd, path=args.llama_path):
+            parser.error(
+                f"{cmd} not found, make sure llama.cpp is installed and in PATH, or supply the path with --llama-cpp-path"
+            )
+    
+    validate_dependency("llama-bench")
+    validate_dependency("llama-cli")
 
     src_f: str | None = args.m
-    src_d: str | None = config["md"]
+    src_d: str | None = args.md
 
-    if not src_f and not src_d:
+    if not (bool(src_f) ^ bool(src_d)):
         parser.error(
-            "Provide either -m <file> or -md <directory>, or MODELS_DIR env var."
+            "Provide either -m <file> or -md <directory>"
         )
 
     files: list[Path] = []
@@ -179,5 +160,5 @@ def load_inputs() -> Inputs:
         k: v for k, v in vars(args).items() if k in param_fields
     }
     return Inputs(
-        str(config["binary"]), files, InputParameters(**kwargs), args.o
+        Path(args.llama_path), files, InputParameters(**kwargs), args.o
     )

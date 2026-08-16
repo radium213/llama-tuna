@@ -94,12 +94,3 @@ test parameters:
   -t threads            number of threads for CPU inference
   -ngl n-gpu-layers     number of layers offloaded to GPU
 ```
-
-## Environment Variables
-
-Some options can be provided by setting environment variables. CLI options take precedence if both are provided.
-
-| Variable | Description |
-|---|---|
-| `LLAMA_BENCH` | path to the `llama-bench` binary |
-| `MODELS_DIR` | directory containing GGUF models |
