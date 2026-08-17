@@ -6,11 +6,13 @@ import logging
 from typing import Literal, TypeGuard, get_args
 from pathlib import Path
 from collections.abc import Iterable
-from dataclasses import asdict, fields, replace
-from llama_tuna.config import Inputs, load_inputs
+from dataclasses import replace
+from llama_tuna.config import load_config, AppConfig
 from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
-from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure, Parameters, Quant
+from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure
 from tqdm import tqdm
+
+from llama_tuna.schema import ModelParams, Quant
 
 
 class DefaultFormatter(logging.Formatter):
@@ -27,10 +29,10 @@ class TestFailure(Exception):
     """Failure to run the model"""
 
 
-def smoke_test(binary: str, model: Path, params: Parameters):
+def smoke_test(binary: str, model: Path, params: ModelParams):
     tq = tqdm(total=1, desc="[ /// ]")
     runner = BenchRunner(binary, model, 1, True)
-    result = runner(replace(params, ngl=0, d=0, p=4, n=2))
+    result = runner(replace(params, ngl=0), d=0, p=4, n=2)
     if result == math.inf:
         tq.close()
         raise TestFailure(f"Could not run {model.name}")
@@ -43,7 +45,7 @@ def optimize[T](
     runner: BenchRunner,
     param: str,
     search_space: Iterable[T],
-    fixed_params: Parameters,
+    fixed_params: ModelParams,
     strat: Literal["auto", "fib", "grid"] = "auto",
 ):
     opt = Optimizer(runner, param, search_space, fixed_params, strat)
@@ -53,7 +55,7 @@ def optimize[T](
 
         total_s = 0.0
         total_tok = 0
-        tok_step = fixed_params.p + fixed_params.n
+        tok_step = 512 + 128 # TODO: refactor
         for s in tq:
             if s < math.inf:
                 total_s += s
@@ -69,13 +71,13 @@ def optimize[T](
     return opt.result()
 
 
-def fit_context(runner: BenchRunner, params: Parameters, search_space: list[tuple[Quant, Quant]], ctx: int) -> tuple[Quant, Quant]:
-    params.d = max(ctx - params.p - params.n, 0)
+def fit_context(runner: BenchRunner, params: ModelParams, search_space: list[tuple[Quant, Quant]], ctx: int) -> tuple[Quant, Quant]:
+    d = max(ctx - 512 - 128, 0) # TODO: refactor
     tq = tqdm(search_space, "[ ctx ]")
     for ctk, ctv in tq:
         params.ctk = ctk
         params.ctv = ctv
-        result = runner(params)
+        result = runner(params, d=d)
         if result < math.inf:
             tq.update(tq.total - tq.n)
             tq.close()
@@ -85,30 +87,10 @@ def fit_context(runner: BenchRunner, params: Parameters, search_space: list[tupl
     raise TestFailure(f"Failed to fit {ctx_str} context")
 
 
-OPTIONS_INCLUDE = ["t", "ngl", "b", "ub", "fa", "ctk", "ctv"]
+def main_loop(config: AppConfig, output: io.TextIOBase):
+    global_t = config.params.t
 
-
-def format_cli(command: str, params: Parameters, ctx: int) -> str:
-    options: list[str] = []
-    for k, v in asdict(params).items():
-        if k in OPTIONS_INCLUDE:
-            options.extend([f"-{k}", str(v)])
-    return " ".join([command] + options) + f" -c {ctx}\n"
-
-
-def format_ini(file: str, name: str, sizelabel: str, params: Parameters, ctx: int) -> str:
-    label: str = f"[{name}-{sizelabel}]"
-    options: list[str] = [f"model = {file}"]
-    for k, v in asdict(params).items():
-        if k in OPTIONS_INCLUDE:
-            options.append(f"{k} = {v}")
-    return "\n".join([label] + options) + f"\nc = {ctx}\n\n"
-
-
-def main_loop(inputs: Inputs, output: io.TextIOBase):
-    global_t = inputs.params.t
-
-    files_sorted = sorted(inputs.files, key=os.path.getsize)
+    files_sorted = sorted(config.files, key=os.path.getsize)
     n_files = len(files_sorted)
     for i_file, file in enumerate(files_sorted, 1):
         if n_files > 1:
@@ -131,14 +113,11 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
             logging.warning(f"Excluded architecture: {metadata.architecture}")
             continue
 
-        bench = BenchRunner(inputs.binary, file)
-        _param_keys = [f.name for f in fields(Parameters)]
-        params = Parameters(
-            **{k: v for k, v in asdict(inputs.params).items() if k in _param_keys and v is not None}
-        )
+        bench = BenchRunner(str(config.llama_bench.resolve()), file)
+        params = config.params.get_params_for(file, metadata.context_length) # TODO: refactor
 
         try:
-            smoke_test(inputs.binary, file, params)
+            smoke_test(str(config.llama_bench.resolve()), file, params)
         except TestFailure as e:
             logging.error(e)
             continue
@@ -163,7 +142,7 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
         else:
             params.t = global_t
 
-        if inputs.params.ngl is None:
+        if config.params.ngl is None:
             layers = metadata.block_count
             try:
                 ngl = optimize(bench, "ngl", range(0, layers + 1), params)
@@ -172,19 +151,19 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
                 logging.error(e)
                 continue
 
-        min_ctx = params.p + params.n
-        req_ctx = inputs.params.c if inputs.params.c is not None else metadata.context_length
+        min_ctx = 512 + 128 # TODO: refactor
+        req_ctx = config.params.c if config.params.c is not None else metadata.context_length
         ctx = max(min(req_ctx, metadata.context_length), min_ctx)
         if ctx != req_ctx:
             logging.warning(f"Context clamped to {ctx}")
         search_space: list[tuple[Quant, Quant]] = []
-        if inputs.params.fa == "off":
+        if config.params.fa == "off":
             search_space = [
                 ("f16", "f16"),
             ]
         else:
-            ctk = inputs.params.ctk
-            ctv = inputs.params.ctv
+            ctk = config.params.ctk
+            ctv = config.params.ctv
             def is_quant(s: str | None) -> TypeGuard[Quant]:
                 return s in get_args(Quant)
             if is_quant(ctk) and is_quant(ctv):
@@ -213,21 +192,21 @@ def main_loop(inputs: Inputs, output: io.TextIOBase):
                     ("q4_0", "q4_0"),
                 ]
         try:
-            ctk, ctv = fit_context(BenchRunner(inputs.binary, file, 1), params, search_space, ctx)
+            ctk, ctv = fit_context(BenchRunner(str(config.llama_bench.resolve()), file, 1), params, search_space, ctx)
             params.ctk = ctk
             params.ctv = ctv
         except TestFailure as e:
             logging.error(e)
             continue
 
-        if inputs.out_format == "cli":
-            output.write(format_cli("llama-server", params, ctx))
-        if inputs.out_format == "ini":
-            output.write(format_ini(str(file), metadata.name, metadata.size_label, params, ctx))
+        if config.out_format == "cli":
+            output.write(params.to_cli())
+        if config.out_format == "ini":
+            output.write(params.to_ini(metadata.name, metadata.size_label))
 
 
 def main():
-    inputs = load_inputs()
+    config: AppConfig = load_config()
 
     log_handler = logging.StreamHandler()
     log_handler.setFormatter(DefaultFormatter())
@@ -235,11 +214,11 @@ def main():
 
     try:
         if isinstance(sys.stdout, io.TextIOBase) and not sys.stdout.isatty():
-            main_loop(inputs, sys.stdout)
+            main_loop(config, sys.stdout)
         else:
             output = io.StringIO()
             try:
-                main_loop(inputs, output)
+                main_loop(config, output)
             finally:
                 print(output.getvalue())
     except KeyboardInterrupt:

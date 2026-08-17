@@ -1,27 +1,18 @@
 import argparse
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, fields
+
+from llama_tuna.schema import InputParams
 
 
-@dataclass
-class InputParameters:
-    fa: str | None = None
-    ctk: str | None = None
-    ctv: str | None = None
-    c: int | None = None
-    t: int | None = None
-    ngl: int | None = None
-    b: int | None = None
-    ub: int | None = None
-
-
-@dataclass
-class Inputs:
-    llama_path: Path
+@dataclass(frozen=True)
+class AppConfig:
+    llama_bench: Path
+    llama_cli: Path
     files: list[Path]
-    params: InputParameters
     out_format: str
+    params: InputParams
 
 
 def create_arg_parser() -> argparse.ArgumentParser:
@@ -110,26 +101,26 @@ def create_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_inputs() -> Inputs:
+def load_config() -> AppConfig:
     parser = create_arg_parser()
     args = parser.parse_args()
 
-    def validate_dependency(cmd: str):
-        if not shutil.which(cmd, path=args.llama_path):
+    def get_path(cmd: str) -> Path:
+        path = shutil.which(cmd, path=args.llama_path)
+        if not path:
             parser.error(
                 f"{cmd} not found, make sure llama.cpp is installed and in PATH, or supply the path with --llama-cpp-path"
             )
-    
-    validate_dependency("llama-bench")
-    validate_dependency("llama-cli")
+        return Path(path)
+
+    llama_bench = get_path("llama-bench")
+    llama_cli = get_path("llama-cli")
 
     src_f: str | None = args.m
     src_d: str | None = args.md
 
     if not (bool(src_f) ^ bool(src_d)):
-        parser.error(
-            "Provide either -m <file> or -md <directory>"
-        )
+        parser.error("Provide either -m <file> or -md <directory>")
 
     files: list[Path] = []
     if src_f:
@@ -155,10 +146,19 @@ def load_inputs() -> Inputs:
             parser.error(f"{d} has no .gguf files.")
         files.extend(gguf_files)
 
-    param_fields = [f.name for f in fields(InputParameters)]
-    kwargs = {
-        k: v for k, v in vars(args).items() if k in param_fields
-    }
-    return Inputs(
-        Path(args.llama_path), files, InputParameters(**kwargs), args.o
+    return AppConfig(
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        files=files,
+        out_format=args.o,
+        params=InputParams(
+            c=args.c,
+            t=args.t,
+            ngl=args.ngl,
+            fa=args.fa,
+            ctk=args.ctk,
+            ctv=args.ctv,
+            b=args.b,
+            ub=args.ub,
+        ),
     )

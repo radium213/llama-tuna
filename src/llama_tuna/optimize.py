@@ -5,26 +5,11 @@ import math
 from functools import cache
 from pathlib import Path
 from contextlib import suppress
-from dataclasses import dataclass, asdict, replace
+from dataclasses import replace
 from collections.abc import Callable, Iterable
 from typing import Generator, Literal, Protocol
 
-
-Quant = Literal["f16", "q8_0", "q4_0"]
-
-
-@dataclass
-class Parameters:
-    fa: Literal["on", "off"] = "on"
-    ctk: Quant = "f16"
-    ctv: Quant = "f16"
-    d: int = 0
-    p: int = 512
-    n: int = 128
-    t: int = 1
-    ngl: int = 0
-    b: int = 2048
-    ub: int = 512
+from llama_tuna.schema import ModelParams
 
 
 class BenchRunner:
@@ -43,12 +28,8 @@ class BenchRunner:
         if no_warmup:
             self.options.append("--no-warmup")
 
-    def __call__(self, params: Parameters) -> float:
-        options: list[str] = []
-        for k, v in asdict(params).items():
-            if v is not None:
-                options.extend([f"-{k}", str(v)])
-        cmd = [self.binary] + options + self.options
+    def __call__(self, params: ModelParams, d: int = 0, p: int = 512, n: int = 128) -> float:
+        cmd = params.to_cli(self.binary) + f" -d {d} -p {p} -n {n}"
 
         def set_oom_score():
             with suppress(FileNotFoundError, PermissionError):
@@ -195,7 +176,7 @@ class Optimizer[T]:
         runner: BenchRunner,
         param: str,
         search_space: Iterable[T],
-        fixed_params: Parameters,
+        fixed_params: ModelParams,
         strat: Literal["auto", "fib", "grid"] = "auto",
     ):
         values = list(search_space)
