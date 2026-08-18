@@ -20,9 +20,13 @@ class ModelParams:
     def to_cli(self, binary: str = "llama-server") -> str:
         options = [f" -{k} {v}" for k, v in asdict(self).items()]
         return binary + "".join(options) + "\n"
+    
+    def to_cli_list(self, binary: str = "llama-server", options_exclude: tuple[str, ...] = ()) -> list[str]:
+        options = [item for k, v in asdict(self).items() for item in [f"-{k}", f"{v}"] if k not in options_exclude]
+        return [binary] + options
 
     def to_ini(self, name: str | None = None, size_label: str | None = None) -> str:
-        label = f"[{name}-{size_label}]" if name and size_label else self.m.stem
+        label = f"[{name}-{size_label}]" if name and size_label else f"[{self.m.stem}]"
         options = [f"\n{k} = {v}" for k, v in asdict(self).items()]
         return label + "".join(options) + "\n"
 

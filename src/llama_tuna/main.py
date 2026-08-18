@@ -31,7 +31,7 @@ class TestFailure(Exception):
 
 def smoke_test(binary: str, model: Path, params: ModelParams):
     tq = tqdm(total=1, desc="[ /// ]")
-    runner = BenchRunner(binary, model, 1, True)
+    runner = BenchRunner(binary, 1, True)
     result = runner(replace(params, ngl=0), d=0, p=4, n=2)
     if result == math.inf:
         tq.close()
@@ -113,7 +113,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
             logging.warning(f"Excluded architecture: {metadata.architecture}")
             continue
 
-        bench = BenchRunner(str(config.llama_bench.resolve()), file)
+        bench = BenchRunner(str(config.llama_bench.resolve()))
         params = config.params.get_params_for(file, metadata.context_length) # TODO: refactor
 
         try:
@@ -130,7 +130,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
                     bench,
                     "t",
                     t_range,
-                    replace(params, ngl=0, d=0),
+                    replace(params, ngl=0),
                     "grid",
                 )
                 params.t = global_t = t
@@ -192,7 +192,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
                     ("q4_0", "q4_0"),
                 ]
         try:
-            ctk, ctv = fit_context(BenchRunner(str(config.llama_bench.resolve()), file, 1), params, search_space, ctx)
+            ctk, ctv = fit_context(BenchRunner(str(config.llama_bench.resolve()), 1), params, search_space, ctx)
             params.ctk = ctk
             params.ctv = ctv
         except TestFailure as e:

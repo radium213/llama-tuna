@@ -3,7 +3,6 @@ import subprocess
 import csv
 import math
 from functools import cache
-from pathlib import Path
 from contextlib import suppress
 from dataclasses import replace
 from collections.abc import Callable, Iterable
@@ -19,17 +18,16 @@ class BenchRunner:
     def __init__(
         self,
         binary: str,
-        model: Path | str,
         repetitions: int = 3,
         no_warmup: bool = True,
     ):
         self.binary = binary
-        self.options = ["-m", str(model), "-o", "csv", "-r", str(repetitions)]
+        self.options = ["-o", "csv", "-r", str(repetitions)]
         if no_warmup:
             self.options.append("--no-warmup")
 
     def __call__(self, params: ModelParams, d: int = 0, p: int = 512, n: int = 128) -> float:
-        cmd = params.to_cli(self.binary) + f" -d {d} -p {p} -n {n}"
+        cmd = params.to_cli_list(self.binary, ("c",)) + ["-d", str(d),  "-p", str(p), "-n", str(n)] + self.options
 
         def set_oom_score():
             with suppress(FileNotFoundError, PermissionError):
