@@ -1,17 +1,24 @@
-import os
 import io
-import sys
-import math
 import logging
-from typing import Literal, TypeGuard, get_args
-from pathlib import Path
+import math
+import os
+import sys
 from collections.abc import Iterable
 from dataclasses import replace
-from llama_tuna.config import load_config, AppConfig
-from llama_tuna.gguf import read_gguf_metadata, GGUFParsingError
-from llama_tuna.optimize import BenchRunner, Optimizer, OptimizeFailure
+from functools import cache
+from pathlib import Path
+from typing import Literal, TypeGuard, get_args
+
 from tqdm import tqdm
 
+from llama_tuna.config import AppConfig, load_config
+from llama_tuna.gguf import GGUFParsingError, read_gguf_metadata
+from llama_tuna.optimize import (
+    BenchRunner,
+    OptimizeFailure,
+    fibonacci_search,
+    grid_search,
+)
 from llama_tuna.schema import ModelParams, Quant
 
 
@@ -48,27 +55,25 @@ def optimize[T](
     fixed_params: ModelParams,
     strat: Literal["auto", "fib", "grid"] = "auto",
 ):
-    opt = Optimizer(runner, param, search_space, fixed_params, strat)
+    values = list(search_space)
+    n = len(values)
 
-    with tqdm(opt, f"[ {param:>3} ]", disable=None) as tq:
-        tq.set_postfix_str("?t/s")
+    tq = tqdm(desc=f"[ {param:>3} ]", disable=None)
 
-        total_s = 0.0
-        total_tok = 0
-        tok_step = 512 + 128 # TODO: refactor
-        for s in tq:
-            if s < math.inf:
-                total_s += s
-                total_tok += tok_step
-            rate = total_tok / total_s if total_s != 0.0 else 0.0
-            if rate >= 1.0:
-                tq.set_postfix_str(f"{rate:.0f}t/s")
-            elif rate == 0.0:
-                tq.set_postfix_str("0t/s")
-            else:
-                tq.set_postfix_str(f"{1.0 / rate:.2f}s/t")
+    def run(i: int) -> float:
+        return runner(replace(fixed_params, **{param: values[i]}))
+    
+    func = cache(run)
 
-    return opt.result()
+    def on_progress(i: int, n: int) -> None:
+        tq.n = i
+        tq.total = n
+        tq.refresh()
+    
+    if strat == "grid" or strat == "auto" and n <= 3:
+        return grid_search(func, n, on_progress)
+    else:
+        return fibonacci_search(func, n, on_progress)
 
 
 def fit_context(runner: BenchRunner, params: ModelParams, search_space: list[tuple[Quant, Quant]], ctx: int) -> tuple[Quant, Quant]:

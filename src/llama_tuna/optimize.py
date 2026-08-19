@@ -1,12 +1,9 @@
-import io
-import subprocess
 import csv
+import io
 import math
-from functools import cache
+import subprocess
+from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import replace
-from collections.abc import Callable, Iterable
-from typing import Generator, Literal, Protocol
 
 from llama_tuna.schema import ModelParams
 
@@ -52,157 +49,81 @@ class BenchRunner:
         return pp_s + tg_s
 
 
-class Strategy(Protocol):
-    def __iter__(self) -> Generator[tuple[int, float], None, None]: ...
-
-    def __len__(self) -> int: ...
-
-    def result(self) -> int: ...
-
-
-class FibonacciStrategy:
-    func: Callable[[int], float]
-    low: int
-    high: int
-    fib: tuple[int, int, int]
-    k: int
-    _result: int
-
-    def __init__(self, func: Callable[[int], float], low: int, high: int):
-        self.func = func
-        self.low = low
-        self.high = high
-        fib = (1, 1, 0)
-        k = 2
-        length = high - low
-        while fib[0] < length:
-            k += 1
-            fib = (fib[0] + fib[1], fib[0], fib[1])
-        self.fib = fib
-        self.k = k
-
-    def __iter__(self) -> Generator[tuple[int, float], None, None]:
-        func, low, high, fib, k = self.func, self.low, self.high, self.fib, self.k
-
-        def get_section(i: int) -> int:
-            return int(round(low + fib[i] / fib[0] * (high - low)))
-
-        a = get_section(2)
-        b = get_section(1)
-        if a == b:
-            a -= 1
-
-        k -= 1
-        f_a = func(a)
-        yield a, f_a
-        k -= 1
-        f_b = func(b)
-        yield b, f_b
-
-        while k > 1:
-            k -= 1
-            if f_a < f_b:
-                high, b, f_b = b, a, f_a
-                a = get_section(2)
-                if a == b and a > low:
-                    a -= 1
-                f_a = func(a)
-                yield a, f_a
-            else:
-                low, a, f_a = a, b, f_b
-                b = get_section(1)
-                if a == b and b < high:
-                    b += 1
-                f_b = func(b)
-                yield b, f_b
-            fib = (fib[1], fib[2], fib[1] - fib[2])
-
-        if f_a < f_b:
-            self._result = a
-        else:
-            self._result = b
-
-    def __len__(self) -> int:
-        return self.k - 1
-
-    def result(self) -> int:
-        return self._result
-
-
-class GridStrategy:
-    func: Callable[[int], float]
-    low: int
-    high: int
-    _result: int
-
-    def __init__(self, func: Callable[[int], float], low: int, high: int):
-        self.func = func
-        self.low = low
-        self.high = high
-
-    def __iter__(self) -> Generator[tuple[int, float], None, None]:
-        func, low, high = self.func, self.low, self.high
-
-        i_min = 0
-        f_min = math.inf
-        for i in range(low, high + 1):
-            f_i = func(i)
-            yield i, f_i
-            if f_i < f_min:
-                i_min = i
-                f_min = f_i
-        self._result = i_min
-
-    def __len__(self) -> int:
-        return self.high - self.low + 1
-
-    def result(self) -> int:
-        return self._result
-
-
 class OptimizeFailure(Exception):
     """Failure to find any valid value."""
 
 
-class Optimizer[T]:
-    values: list[T]
-    strategy: Strategy
-    _result: T
+def fibonacci_search(
+    func: Callable[[int], float],
+    length: int,
+    progress_callback: Callable[[int, int], None],
+) -> int:
+    fib: tuple[int, int, int] = (1, 1, 0)
+    k = 2
 
-    def __init__(
-        self,
-        runner: BenchRunner,
-        param: str,
-        search_space: Iterable[T],
-        fixed_params: ModelParams,
-        strat: Literal["auto", "fib", "grid"] = "auto",
-    ):
-        values = list(search_space)
-        self.values = values
+    while fib[0] < length - 1:
+        k += 1
+        fib = (fib[0] + fib[1], fib[0], fib[1])
+    k_max = k
+    
+    def get_section(i: int) -> int:
+        return round(low + fib[i] / fib[0] * (high - low))
+    
+    def evaluate(i: int, k: int) -> tuple[float, int]:
+        f = func(i)
+        progress_callback(k_max - k + 1, k_max - 1)
+        return f, k - 1
 
-        def run(i: int) -> float:
-            return runner(replace(fixed_params, **{param: values[i]}))
+    progress_callback(0, k_max - 1)
 
-        func = cache(run)
+    low = 0
+    high = length - 1
+    a = get_section(2)
+    b = get_section(1)
+    if a == b:
+        a -= 1
+    
+    f_a, k = evaluate(a, k)
+    f_b, k = evaluate(b, k)
 
-        n = len(values)
-        if strat == "grid" or strat == "auto" and n <= 3:
-            self.strategy = GridStrategy(func, 0, n - 1)
+    while k > 1:
+        if f_a <= f_b:
+            high, b, f_b = b, a, f_a
+            a = get_section(2)
+            if a == b and a > low:
+                a -= 1
+            f_a, k = evaluate(a, k)
         else:
-            self.strategy = FibonacciStrategy(func, 0, n - 1)
+            low, a, f_a = a, b, f_b
+            b = get_section(1)
+            if a == b and b < high:
+                b += 1
+            f_b, k = evaluate(b, k)
+        fib = (fib[1], fib[2], fib[1] - fib[2])
 
-    def __iter__(self) -> Generator[float, None, None]:
-        min_s = math.inf
-        for _, s in self.strategy:
-            min_s = min(min_s, s)
-            yield s
+    if f_a == math.inf and f_b == math.inf:
+        raise OptimizeFailure("All parameter values fail")
+    if f_a < f_b:
+        return a
+    else:
+        return b
 
-        if min_s == math.inf:
-            raise OptimizeFailure("All parameter values fail")
-        self._result = self.values[self.strategy.result()]
 
-    def __len__(self) -> int:
-        return len(self.strategy)
-
-    def result(self) -> T:
-        return self._result
+def grid_search[T](
+    func: Callable[[int], float],
+    length: int,
+    progress_callback: Callable[[int, int], None],
+) -> int:
+    progress_callback(0, length)
+    i_min = 0
+    f_min = math.inf
+    for i in range(length):
+        f_i = func(i)
+        progress_callback(i + 1, length)
+        if f_i < f_min:
+            i_min = i
+            f_min = f_i
+            
+    if f_min == math.inf:
+        raise OptimizeFailure("All parameter values fail")
+    return i_min
