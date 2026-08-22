@@ -92,30 +92,30 @@ def fit_context(runner: BenchRunner, params: ModelParams, search_space: list[tup
     raise TestFailure(f"Failed to fit {ctx_str} context")
 
 
-def main_loop(config: AppConfig, output: io.TextIOBase):
+def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
     global_t = config.params.t
 
     files_sorted = sorted(config.files, key=os.path.getsize)
     n_files = len(files_sorted)
     for i_file, file in enumerate(files_sorted, 1):
         if n_files > 1:
-            logging.info(f"[{i_file:>3}/{n_files:>3}] {file.name}")
+            logger.info(f"[{i_file:>3}/{n_files:>3}] {file.name}")
         else:
-            logging.info(f"[---/---] {file.name}")
+            logger.info(f"[---/---] {file.name}")
         try:
             metadata = read_gguf_metadata(file)
         except GGUFParsingError as e:
-            logging.error(e)
+            logger.error(e)
             continue
         if metadata.file_type != "model":
-            logging.warning(f'Incompatible type: {metadata.file_type}, expected "model"')
+            logger.warning(f'Incompatible type: {metadata.file_type}, expected "model"')
             continue
         if not metadata.architecture or metadata.architecture in [
             "whisper",
             "clip",
             "siglip",
         ]:
-            logging.warning(f"Excluded architecture: {metadata.architecture}")
+            logger.warning(f"Excluded architecture: {metadata.architecture}")
             continue
 
         bench = BenchRunner(str(config.llama_bench.resolve()))
@@ -124,7 +124,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
         try:
             smoke_test(str(config.llama_bench.resolve()), file, params)
         except TestFailure as e:
-            logging.error(e)
+            logger.error(e)
             continue
 
         if global_t is None:
@@ -140,10 +140,10 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
                 )
                 params.t = global_t = t
             except OptimizeFailure as e:
-                logging.error(e)
+                logger.error(e)
                 continue
             if n_files > 1:
-                logging.info(f"Continuing with -t {global_t} for all models")
+                logger.info(f"Continuing with -t {global_t} for all models")
         else:
             params.t = global_t
 
@@ -153,14 +153,14 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
                 ngl = optimize(bench, "ngl", range(0, layers + 1), params)
                 params.ngl = ngl
             except OptimizeFailure as e:
-                logging.error(e)
+                logger.error(e)
                 continue
 
         min_ctx = 512 + 128 # TODO: refactor
         req_ctx = config.params.c if config.params.c is not None else metadata.context_length
         ctx = max(min(req_ctx, metadata.context_length), min_ctx)
         if ctx != req_ctx:
-            logging.warning(f"Context clamped to {ctx}")
+            logger.warning(f"Context clamped to {ctx}")
         search_space: list[tuple[Quant, Quant]] = []
         if config.params.fa == "off":
             search_space = [
@@ -201,7 +201,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase):
             params.ctk = ctk
             params.ctv = ctv
         except TestFailure as e:
-            logging.error(e)
+            logger.error(e)
             continue
 
         if config.out_format == "cli":
@@ -215,15 +215,17 @@ def main():
 
     log_handler = logging.StreamHandler()
     log_handler.setFormatter(DefaultFormatter())
-    logging.basicConfig(level=logging.INFO, handlers=[log_handler])
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(log_handler)
 
     try:
         if isinstance(sys.stdout, io.TextIOBase) and not sys.stdout.isatty():
-            main_loop(config, sys.stdout)
+            main_loop(config, sys.stdout, logger)
         else:
             output = io.StringIO()
             try:
-                main_loop(config, output)
+                main_loop(config, output, logger)
             finally:
                 print(output.getvalue())
     except KeyboardInterrupt:
