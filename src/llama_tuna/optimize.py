@@ -2,6 +2,7 @@ import csv
 import io
 import math
 import subprocess
+import sys
 from collections.abc import Callable
 from contextlib import suppress
 
@@ -23,16 +24,26 @@ class BenchRunner:
         if no_warmup:
             self.options.append("--no-warmup")
 
-    def __call__(self, params: ModelParams, d: int = 0, p: int = 512, n: int = 128) -> float:
-        cmd = params.to_cli_list(self.binary, ("c",)) + ["-d", str(d),  "-p", str(p), "-n", str(n)] + self.options
+    def __call__(
+        self, params: ModelParams, d: int = 0, p: int = 512, n: int = 128
+    ) -> float:
+        cmd = (
+            params.to_cli_list(self.binary, ("c",))
+            + ["-d", str(d), "-p", str(p), "-n", str(n)]
+            + self.options
+        )
 
-        def set_oom_score():
-            with suppress(FileNotFoundError, PermissionError):
-                with open("/proc/self/oom_score_adj", "w") as f:
-                    f.write(str(1000))
+        def set_oom_score() -> None:
+            with (
+                suppress(FileNotFoundError, PermissionError),
+                open("/proc/self/oom_score_adj", "w") as f,
+            ):
+                f.write(str(1000))
+
+        preexec = set_oom_score if sys.platform != "win32" else None
 
         result = subprocess.run(
-            cmd, preexec_fn=set_oom_score, capture_output=True, text=True
+            cmd, preexec_fn=preexec, capture_output=True, check=False, text=True
         )
 
         if result.returncode != 0:
@@ -65,10 +76,10 @@ def fibonacci_search(
         k += 1
         fib = (fib[0] + fib[1], fib[0], fib[1])
     k_max = k
-    
+
     def get_section(i: int) -> int:
         return round(low + fib[i] / fib[0] * (high - low))
-    
+
     def evaluate(i: int, k: int) -> tuple[float, int]:
         f = func(i)
         progress_callback(k_max - k + 1, k_max - 1)
@@ -82,7 +93,7 @@ def fibonacci_search(
     b = get_section(1)
     if a == b:
         a -= 1
-    
+
     f_a, k = evaluate(a, k)
     f_b, k = evaluate(b, k)
 
@@ -123,7 +134,7 @@ def grid_search[T](
         if f_i < f_min:
             i_min = i
             f_min = f_i
-            
+
     if f_min == math.inf:
         raise OptimizeFailure("All parameter values fail")
     return i_min

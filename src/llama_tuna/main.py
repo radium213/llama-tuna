@@ -70,10 +70,15 @@ def optimize[T](
         tq.total = n
         tq.refresh()
     
-    if strat == "grid" or strat == "auto" and n <= 3:
-        return grid_search(func, n, on_progress)
-    else:
-        return fibonacci_search(func, n, on_progress)
+    try:
+        if strat == "grid" or strat == "auto" and n <= 3:
+            idx = grid_search(func, n, on_progress)
+        else:
+            idx = fibonacci_search(func, n, on_progress)
+    finally:
+        tq.close()
+    
+    return values[idx]
 
 
 def fit_context(runner: BenchRunner, params: ModelParams, search_space: list[tuple[Quant, Quant]], ctx: int) -> tuple[Quant, Quant]:
