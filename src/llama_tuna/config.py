@@ -114,7 +114,7 @@ def load_config() -> AppConfig:
         return Path(path)
 
     llama_bench = get_path("llama-bench")
-    llama_cli = get_path("llama-cli")
+    llama_cli = get_path("llama-completion")
 
     src_f: str | None = args.m
     src_d: str | None = args.md

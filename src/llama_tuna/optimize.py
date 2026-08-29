@@ -9,6 +9,21 @@ from contextlib import suppress
 from llama_tuna.schema import ModelParams
 
 
+def _set_oom_score() -> None:
+    with (
+        suppress(FileNotFoundError, PermissionError),
+        open("/proc/self/oom_score_adj", "w") as f,
+    ):
+        f.write(str(1000))
+
+
+def _subprocess(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    preexec = _set_oom_score if sys.platform != "win32" else None
+    return subprocess.run(
+        cmd, check=False, capture_output=True, text=True, preexec_fn=preexec
+    )
+
+
 class BenchRunner:
     binary: str
     options: list[str]
@@ -33,18 +48,7 @@ class BenchRunner:
             + self.options
         )
 
-        def set_oom_score() -> None:
-            with (
-                suppress(FileNotFoundError, PermissionError),
-                open("/proc/self/oom_score_adj", "w") as f,
-            ):
-                f.write(str(1000))
-
-        preexec = set_oom_score if sys.platform != "win32" else None
-
-        result = subprocess.run(
-            cmd, preexec_fn=preexec, capture_output=True, check=False, text=True
-        )
+        result = _subprocess(cmd)
 
         if result.returncode != 0:
             return math.inf
@@ -58,6 +62,29 @@ class BenchRunner:
         pp_s = get_results(data, "n_prompt")
         tg_s = get_results(data, "n_gen")
         return pp_s + tg_s
+
+
+class CliRunner:
+    binary: str
+    options: list[str]
+
+    def __init__(
+        self,
+        binary: str,
+    ):
+        self.binary = binary
+        self.options = ["-st"]
+
+    def __call__(self, params: ModelParams, p: str = "?", n: int = 1) -> bool:
+        cmd = (
+            params.to_cli_list(self.binary)
+            + ["-p", p, "-n", str(n)]
+            + self.options
+        )
+
+        result = _subprocess(cmd)
+
+        return result.returncode == 0
 
 
 class OptimizeFailure(Exception):

@@ -1,13 +1,11 @@
 import io
 import logging
-import math
 import os
 import sys
 from collections.abc import Iterable
 from dataclasses import replace
 from functools import cache
-from pathlib import Path
-from typing import Literal, TypeGuard, get_args
+from typing import Literal
 
 from tqdm import tqdm
 
@@ -15,11 +13,12 @@ from llama_tuna.config import AppConfig, load_config
 from llama_tuna.gguf import GGUFParsingError, read_gguf_metadata
 from llama_tuna.optimize import (
     BenchRunner,
+    CliRunner,
     OptimizeFailure,
     fibonacci_search,
     grid_search,
 )
-from llama_tuna.schema import ModelParams, Quant
+from llama_tuna.schema import ModelParams
 
 
 class DefaultFormatter(logging.Formatter):
@@ -36,15 +35,14 @@ class TestFailure(Exception):
     """Failure to run the model"""
 
 
-def smoke_test(binary: str, model: Path, params: ModelParams):
-    tq = tqdm(total=1, desc="[ /// ]")
-    runner = BenchRunner(binary, 1, True)
-    result = runner(replace(params, ngl=0), d=0, p=4, n=2)
-    if result == math.inf:
-        tq.close()
-        raise TestFailure(f"Could not run {model.name}")
-    else:
+def smoke_test(runner: CliRunner, params: ModelParams):
+    tq = tqdm(total=1, desc="[   - ]")
+    try:
+        result = runner(params)
+        if not result:
+            raise TestFailure(f"Could not run {params.m}")
         tq.update()
+    finally:
         tq.close()
 
 
@@ -81,32 +79,13 @@ def optimize[T](
     return values[idx]
 
 
-def fit_context(runner: BenchRunner, params: ModelParams, search_space: list[tuple[Quant, Quant]], ctx: int) -> tuple[Quant, Quant]:
-    d = max(ctx - 512 - 128, 0) # TODO: refactor
-    tq = tqdm(search_space, "[ ctx ]")
-    for ctk, ctv in tq:
-        params.ctk = ctk
-        params.ctv = ctv
-        result = runner(params, d=d)
-        if result < math.inf:
-            tq.update(tq.total - tq.n)
-            tq.close()
-            return ctk, ctv
-    ctx_k = ctx // 1000
-    ctx_str = str(ctx_k) + "k" if ctx_k > 0 else str(ctx)
-    raise TestFailure(f"Failed to fit {ctx_str} context")
-
-
 def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
     global_t = config.params.t
 
     files_sorted = sorted(config.files, key=os.path.getsize)
     n_files = len(files_sorted)
     for i_file, file in enumerate(files_sorted, 1):
-        if n_files > 1:
-            logger.info(f"[{i_file:>3}/{n_files:>3}] {file.name}")
-        else:
-            logger.info(f"[---/---] {file.name}")
+        logger.info(f"[{i_file:>3}/{n_files:>3}] {file.name}")
         try:
             metadata = read_gguf_metadata(file)
         except GGUFParsingError as e:
@@ -124,10 +103,11 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
             continue
 
         bench = BenchRunner(str(config.llama_bench.resolve()))
+        cli = CliRunner(str(config.llama_cli.resolve()))
         params = config.params.get_params_for(file, metadata.context_length) # TODO: refactor
 
         try:
-            smoke_test(str(config.llama_bench.resolve()), file, params)
+            smoke_test(cli, params)
         except TestFailure as e:
             logger.error(e)
             continue
@@ -160,54 +140,6 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
             except OptimizeFailure as e:
                 logger.error(e)
                 continue
-
-        min_ctx = 512 + 128 # TODO: refactor
-        req_ctx = config.params.c if config.params.c is not None else metadata.context_length
-        ctx = max(min(req_ctx, metadata.context_length), min_ctx)
-        if ctx != req_ctx:
-            logger.warning(f"Context clamped to {ctx}")
-        search_space: list[tuple[Quant, Quant]] = []
-        if config.params.fa == "off":
-            search_space = [
-                ("f16", "f16"),
-            ]
-        else:
-            ctk = config.params.ctk
-            ctv = config.params.ctv
-            def is_quant(s: str | None) -> TypeGuard[Quant]:
-                return s in get_args(Quant)
-            if is_quant(ctk) and is_quant(ctv):
-                search_space = [
-                    (ctk, ctv),
-                ]
-            elif is_quant(ctk):
-                search_space = [
-                    (ctk, "f16"),
-                    (ctk, "q8_0"),
-                    (ctk, "q4_0"),
-                ]
-            elif is_quant(ctv):
-                search_space = [
-                    ("f16", ctv),
-                    ("q8_0", ctv),
-                    ("q4_0", ctv),
-                ]
-            else:
-                search_space = [
-                    ("f16", "f16"),
-                    ("f16", "q8_0"),
-                    ("f16", "q4_0"),
-                    ("q8_0", "q8_0"),
-                    ("q8_0", "q4_0"),
-                    ("q4_0", "q4_0"),
-                ]
-        try:
-            ctk, ctv = fit_context(BenchRunner(str(config.llama_bench.resolve()), 1), params, search_space, ctx)
-            params.ctk = ctk
-            params.ctv = ctv
-        except TestFailure as e:
-            logger.error(e)
-            continue
 
         if config.out_format == "cli":
             output.write(params.to_cli())
