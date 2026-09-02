@@ -101,20 +101,26 @@ def create_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class ToolPathError(Exception):
+    """Tool path not found"""
+
+def _get_tool_path(cmds: list[str], at: str) -> Path:
+    for cmd in cmds:
+        path = shutil.which(cmd, path=at)
+        if path:
+            return Path(path)
+    raise ToolPathError(f"{", ".join(cmds)} not found, make sure llama.cpp is installed and in PATH, or supply the path with --llama-cpp-path")
+
+
 def load_config() -> AppConfig:
     parser = create_arg_parser()
     args = parser.parse_args()
 
-    def get_path(cmd: str) -> Path:
-        path = shutil.which(cmd, path=args.llama_path)
-        if not path:
-            parser.error(
-                f"{cmd} not found, make sure llama.cpp is installed and in PATH, or supply the path with --llama-cpp-path"
-            )
-        return Path(path)
-
-    llama_bench = get_path("llama-bench")
-    llama_cli = get_path("llama-completion")
+    try:
+        llama_bench = _get_tool_path(["llama-bench"], args.llama_path)
+        llama_cli = _get_tool_path(["llama-completion", "llama-cli"], args.llama_path)
+    except ToolPathError as e:
+        parser.error(str(e))
 
     src_f: str | None = args.m
     src_d: str | None = args.md
