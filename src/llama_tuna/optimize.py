@@ -11,14 +11,14 @@ from llama_tuna.schema import ModelParams
 
 def _set_oom_score() -> None:
     with (
-        suppress(FileNotFoundError, PermissionError),
+        suppress(FileNotFoundError, PermissionError, OSError),
         open("/proc/self/oom_score_adj", "w") as f,
     ):
         f.write(str(1000))
 
 
 def _subprocess(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    preexec = _set_oom_score if sys.platform != "win32" else None
+    preexec = _set_oom_score if sys.platform.startswith("linux") else None
     return subprocess.run(
         cmd, check=False, capture_output=True, text=True, preexec_fn=preexec
     )
