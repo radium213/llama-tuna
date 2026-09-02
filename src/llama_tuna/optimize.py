@@ -172,6 +172,8 @@ def binary_search[T](
     values: list[T],
     progress_callback: Callable[[int, int], None]
 ) -> T:
+    if not values:
+        raise OptimizeFailure("Empty search space")
     max_it = math.ceil(math.log2(len(values)))
     it = 0
     progress_callback(it, max_it)
