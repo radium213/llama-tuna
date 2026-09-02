@@ -19,41 +19,41 @@ uv tool install git+https://github.com/radium213/llama-tuna
 Run the benchmark sequence on a single model...
 
 ```bash
-llama-tuna -m ~/models/llama-3.1-8B.gguf
+llama-tuna -m /models/llama-3.1-8B.gguf
 ```
 
 ...or across a directory containing multiple GGUF models.
 
 ```bash
-llama-tuna -md ~/models
+llama-tuna -md /models
 ```
 
 By default `llama-tuna` tests models near their maximum context size, which can be very slow.
 It's best to specify your desired context size explicitly.
 
 ```bash
-llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384
+llama-tuna -m /models/llama-3.1-8B.gguf -c 16384
 ```
 
 Found parameters can be output as either a `llama-server` CLI string...
 
 ```bash
-llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384 -o cli
+llama-tuna -m /models/llama-3.1-8B.gguf -c 16384 -o cli
 ```
 ```text
 # output
-llama-server -fa on -ctk f16 -ctv f16 -t 4 -ngl 32 -b 2048 -ub 512 -c 16384
+llama-server -m /models/llama-3.1-8B.gguf -fa on -ctk f16 -ctv f16 -t 4 -ngl 32 -b 2048 -ub 512 -c 16384
 ```
 
 ...or text that can be piped into a `models.ini` file.
 
 ```bash
-llama-tuna -m ~/models/llama-3.1-8B.gguf -c 16384 -o ini > models.ini
+llama-tuna -m /models/llama-3.1-8B.gguf -c 16384 -o ini > models.ini
 ```
 ```ini
 # models.ini
 [llama-3.1-8B]
-model = ~/models/llama-3.1-8B.gguf
+m = /models/llama-3.1-8B.gguf
 fa = on
 ctk = f16
 ctv = f16
@@ -86,7 +86,8 @@ global settings:
   -b batch-size         batch size
   -ub ubatch-size       microbatch size
   -o {cli,ini}          output format: llama-server CLI string or ini
-  --llama-bench path    path to llama-bench binary
+  --llama-cpp-path path
+                        path to llama.cpp binaries
 
 test parameters:
   if supplied, will not be searched for
