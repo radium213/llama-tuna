@@ -34,7 +34,7 @@ class DefaultFormatter(logging.Formatter):
 
 def find_max_ngl(runner: CliRunner, search_space: Iterable[int], params: ModelParams):
     values = list(search_space)
-    tq = tqdm(desc="[ ctx ]")
+    tq = tqdm(desc="[fit-ctx]")
 
     def run(val: int) -> bool:
         return runner(replace(params, ngl=val))
@@ -60,7 +60,7 @@ def optimize[T](
     values = list(search_space)
     n = len(values)
 
-    tq = tqdm(desc=f"[ {param:>3} ]", disable=None)
+    tq = tqdm(desc=f"[{param:>3}=  ?]", disable=None)
 
     def run(i: int) -> float:
         return runner(replace(fixed_params, **{param: values[i]}))
@@ -77,6 +77,7 @@ def optimize[T](
             idx = grid_search(func, n, on_progress)
         else:
             idx = fibonacci_search(func, n, on_progress)
+        tq.desc = f"[{param:>3}={values[idx]:>3}]"
     finally:
         tq.close()
     
@@ -125,7 +126,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
                 logger.error(e)
                 continue
             if n_files > 1:
-                logger.info(f"Continuing with -t {global_t} for all models")
+                logger.info(f"Continuing with t={global_t} for all models")
         else:
             params.t = global_t
 
