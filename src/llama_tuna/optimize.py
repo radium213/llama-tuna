@@ -73,7 +73,7 @@ class CliRunner:
         binary: str,
     ):
         self.binary = binary
-        self.options = ["-st"]
+        self.options = ["-st", "-no-cnv"]
 
     def __call__(self, params: ModelParams, p: str = "?", n: int = 1) -> bool:
         cmd = (
@@ -165,3 +165,30 @@ def grid_search[T](
     if f_min == math.inf:
         raise OptimizeFailure("All parameter values fail")
     return i_min
+
+
+def binary_search[T](
+    func: Callable[[T], bool],
+    values: list[T],
+    progress_callback: Callable[[int, int], None]
+) -> T:
+    max_it = math.ceil(math.log2(len(values)))
+    it = 0
+    progress_callback(it, max_it)
+
+    low = 0
+    high = len(values)
+    while low < high:
+        mid = low + (high - low) // 2
+        if func(values[mid]):
+            low = mid + 1
+        else:
+            high = mid
+        it += 1
+        progress_callback(it, max_it)
+    progress_callback(max_it, max_it)
+
+    if high - 1 < 0:
+        raise OptimizeFailure("All parameter values fail")
+
+    return values[high - 1]

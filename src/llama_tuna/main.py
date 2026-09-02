@@ -15,6 +15,7 @@ from llama_tuna.optimize import (
     BenchRunner,
     CliRunner,
     OptimizeFailure,
+    binary_search,
     fibonacci_search,
     grid_search,
 )
@@ -31,17 +32,20 @@ class DefaultFormatter(logging.Formatter):
         return msg
 
 
-class TestFailure(Exception):
-    """Failure to run the model"""
+def find_max_ngl(runner: CliRunner, search_space: Iterable[int], params: ModelParams):
+    values = list(search_space)
+    tq = tqdm(desc="[ ctx ]")
 
+    def run(val: int) -> bool:
+        return runner(replace(params, ngl=val))
+    
+    def on_progress(i: int, n: int) -> None:
+        tq.n = i
+        tq.total = n
+        tq.refresh()
 
-def smoke_test(runner: CliRunner, params: ModelParams):
-    tq = tqdm(total=1, desc="[   - ]")
     try:
-        result = runner(params)
-        if not result:
-            raise TestFailure(f"Could not run {params.m}")
-        tq.update()
+        return binary_search(run, values, on_progress)
     finally:
         tq.close()
 
@@ -104,13 +108,9 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
 
         bench = BenchRunner(str(config.llama_bench.resolve()))
         cli = CliRunner(str(config.llama_cli.resolve()))
-        params = config.params.get_params_for(file, metadata.context_length) # TODO: refactor
-
-        try:
-            smoke_test(cli, params)
-        except TestFailure as e:
-            logger.error(e)
-            continue
+        params = config.params.get_params_for(file, metadata.context_length)
+        if params.c > metadata.context_length:
+            logger.warning(f"Specified context {params.c} exceeds model max {metadata.context_length}")
 
         if global_t is None:
             ncpu = os.cpu_count() or 1
@@ -132,10 +132,15 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
         else:
             params.t = global_t
 
+        try:
+            ngl_max = find_max_ngl(cli, range(metadata.block_count + 1), params)
+        except OptimizeFailure:
+            logger.error(f"Unable to fit model with {params.c} context")
+            continue
+
         if config.params.ngl is None:
-            layers = metadata.block_count
             try:
-                ngl = optimize(bench, "ngl", range(0, layers + 1), params)
+                ngl = optimize(bench, "ngl", range(ngl_max + 1), params)
                 params.ngl = ngl
             except OptimizeFailure as e:
                 logger.error(e)
