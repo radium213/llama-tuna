@@ -1,7 +1,7 @@
-import struct
 import io
-from pathlib import Path
+import struct
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 SUPPORTED_VERSIONS = [2, 3]
@@ -15,7 +15,6 @@ ValueType = int | float | bool | str | list[Any]
 class GGUFMetadata:
     version: int
     tensor_count: int
-    file_type: str
     architecture: str
     name: str
     size_label: str
@@ -111,7 +110,6 @@ def _read_metadata(path: str | Path) -> tuple[dict[str, ValueType], int, int]:
 
 def read_gguf_metadata(path: str | Path) -> GGUFMetadata:
     gguf_meta, gguf_version, tensor_count = _read_metadata(path)
-    file_type = gguf_meta.get("general.type", "")
     architecture = gguf_meta.get("general.architecture", "")
     name = gguf_meta.get("general.name", "")
     size_label = gguf_meta.get("general.size_label", "")
@@ -120,7 +118,6 @@ def read_gguf_metadata(path: str | Path) -> GGUFMetadata:
     return GGUFMetadata(
         gguf_version,
         tensor_count,
-        str(file_type),
         str(architecture),
         str(name),
         str(size_label),

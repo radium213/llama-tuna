@@ -95,9 +95,6 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
         except GGUFParsingError as e:
             logger.error(e)
             continue
-        if metadata.file_type != "model":
-            logger.warning(f'Incompatible type: {metadata.file_type}, expected "model"')
-            continue
         if not metadata.architecture or metadata.architecture in [
             "whisper",
             "clip",
