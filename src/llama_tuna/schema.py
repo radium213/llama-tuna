@@ -43,7 +43,7 @@ class InputParams:
     ub: int | None = None
 
     def get_params_for(self, model: Path, default_context: int) -> ModelParams:
-        return ModelParams(
+        p = ModelParams(
             m=model,
             c=self.c if self.c is not None else default_context,
             t=self.t if self.t is not None else 1,
@@ -54,3 +54,5 @@ class InputParams:
             b=self.b if self.b is not None else 2048,
             ub=self.ub if self.ub is not None else 512,
         )
+        p.ub = min(p.ub, p.b)
+        return p
