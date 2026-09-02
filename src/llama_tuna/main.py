@@ -56,14 +56,13 @@ def optimize[T](
     search_space: Iterable[T],
     fixed_params: ModelParams,
     strat: Literal["auto", "fib", "grid"] = "auto",
-):
+) -> T:
     values = list(search_space)
-    n = len(values)
 
     tq = tqdm(desc=f"[{param:>3}=  ?]", disable=None)
 
-    def run(i: int) -> float:
-        return runner(replace(fixed_params, **{param: values[i]}))
+    def run(v: T) -> float:
+        return runner(replace(fixed_params, **{param: v}))
     
     func = cache(run)
 
@@ -73,15 +72,15 @@ def optimize[T](
         tq.refresh()
     
     try:
-        if strat == "grid" or strat == "auto" and n <= 3:
-            idx = grid_search(func, n, on_progress)
+        if strat == "grid" or strat == "auto" and len(values) <= 3:
+            v = grid_search(func, values, on_progress)
         else:
-            idx = fibonacci_search(func, n, on_progress)
-        tq.desc = f"[{param:>3}={values[idx]:>3}]"
+            v = fibonacci_search(func, values, on_progress)
+        tq.desc = f"[{param:>3}={v:>3}]"
     finally:
         tq.close()
     
-    return values[idx]
+    return v
 
 
 def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):

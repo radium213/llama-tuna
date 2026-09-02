@@ -91,11 +91,14 @@ class OptimizeFailure(Exception):
     """Failure to find any valid value."""
 
 
-def fibonacci_search(
-    func: Callable[[int], float],
-    length: int,
-    progress_callback: Callable[[int, int], None],
-) -> int:
+def fibonacci_search[T](
+    func: Callable[[T], float],
+    values: list[T],
+    progress_callback: Callable[[int, int], None] = lambda a, b: None,
+) -> T:
+    if not values:
+        raise OptimizeFailure("Empty search space")
+    length = len(values)
     fib: tuple[int, int, int] = (1, 1, 0)
     k = 2
 
@@ -108,7 +111,7 @@ def fibonacci_search(
         return round(low + fib[i] / fib[0] * (high - low))
 
     def evaluate(i: int, k: int) -> tuple[float, int]:
-        f = func(i)
+        f = func(values[i])
         progress_callback(k_max - k + 1, k_max - 1)
         return f, k - 1
 
@@ -142,21 +145,24 @@ def fibonacci_search(
     if f_a == math.inf and f_b == math.inf:
         raise OptimizeFailure("All parameter values fail")
     if f_a < f_b:
-        return a
+        return values[a]
     else:
-        return b
+        return values[b]
 
 
 def grid_search[T](
-    func: Callable[[int], float],
-    length: int,
-    progress_callback: Callable[[int, int], None],
-) -> int:
+    func: Callable[[T], float],
+    values: list[T],
+    progress_callback: Callable[[int, int], None] = lambda a, b: None,
+) -> T:
+    if not values:
+        raise OptimizeFailure("Empty search space")
+    length = len(values)
     progress_callback(0, length)
     i_min = 0
     f_min = math.inf
     for i in range(length):
-        f_i = func(i)
+        f_i = func(values[i])
         progress_callback(i + 1, length)
         if f_i < f_min:
             i_min = i
@@ -164,13 +170,13 @@ def grid_search[T](
 
     if f_min == math.inf:
         raise OptimizeFailure("All parameter values fail")
-    return i_min
+    return values[i_min]
 
 
 def binary_search[T](
     func: Callable[[T], bool],
     values: list[T],
-    progress_callback: Callable[[int, int], None]
+    progress_callback: Callable[[int, int], None] = lambda a, b: None,
 ) -> T:
     if not values:
         raise OptimizeFailure("Empty search space")
