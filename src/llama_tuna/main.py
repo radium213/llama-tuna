@@ -84,8 +84,6 @@ def optimize[T](
 
 
 def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
-    global_t = config.params.t
-
     files_sorted = sorted(config.files, key=os.path.getsize)
     n_files = len(files_sorted)
     for i_file, file in enumerate(files_sorted, 1):
@@ -106,28 +104,11 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
         bench = BenchRunner(str(config.llama_bench.resolve()))
         cli = CliRunner(str(config.llama_cli.resolve()))
         params = config.params.get_params_for(file, metadata.context_length)
+        ncpu = os.cpu_count() or 1
+        min_t = min(config.params.t or 4, ncpu)
+
         if params.c > metadata.context_length:
             logger.warning(f"Specified context {params.c} exceeds model max {metadata.context_length}")
-
-        if global_t is None:
-            ncpu = os.cpu_count() or 1
-            t_range = [1] if ncpu == 1 else range(2, ncpu + 1, 2)
-            try:
-                t = optimize(
-                    bench,
-                    "t",
-                    t_range,
-                    replace(params, ngl=0),
-                    "grid",
-                )
-                params.t = global_t = t
-            except OptimizeFailure as e:
-                logger.error(e)
-                continue
-            if n_files > 1:
-                logger.info(f"Continuing with t={global_t} for all models")
-        else:
-            params.t = global_t
 
         try:
             ngl_max = find_max_ngl(cli, range(metadata.block_count + 1), params)
@@ -137,7 +118,12 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
 
         if config.params.ngl is None:
             try:
-                ngl = optimize(bench, "ngl", range(ngl_max + 1), params)
+                ngl = optimize(
+                    bench,
+                    "ngl",
+                    range(ngl_max + 1),
+                    replace(params, t=min_t),
+                )
                 params.ngl = ngl
             except OptimizeFailure as e:
                 logger.error(e)
@@ -146,6 +132,23 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
             if params.ngl > ngl_max:
                 logger.warning(f"Specified gpu layers {params.ngl} will not fit in VRAM, clamping to {ngl_max}")
             params.ngl = min(params.ngl, ngl_max)
+
+        if config.params.t is None:
+            if params.ngl < metadata.block_count:
+                try:
+                    t = optimize(
+                        bench,
+                        "t",
+                        range(1, ncpu + 1),
+                        params,
+                        "grid",
+                    )
+                    params.t = t
+                except OptimizeFailure as e:
+                    logger.error(e)
+                    continue
+            else:
+                params.t = min_t
 
         if config.out_format == "cli":
             output.write(params.to_cli())
