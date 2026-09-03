@@ -27,7 +27,13 @@ class ModelParams:
         return [binary] + options
 
     def to_ini(self, name: str | None = None, size_label: str | None = None) -> str:
-        label = f"[{name}-{size_label}]" if name and size_label else f"[{self.m.stem}]"
+        if name:
+            if not size_label or size_label.lower() in name.lower():
+                label = f"[{name}]"
+            else:
+                label = f"[{name}-{size_label}]"
+        else:
+            label = f"[{self.m.stem}]"
         options = [f"\n{k} = {v}" for k, v in asdict(self).items()]
         return label + "".join(options) + "\n"
 
