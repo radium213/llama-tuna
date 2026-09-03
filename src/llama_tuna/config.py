@@ -1,5 +1,5 @@
-import argparse
 import shutil
+from argparse import ArgumentParser, ArgumentTypeError
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,20 +15,55 @@ class AppConfig:
     params: InputParams
 
 
-def create_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+def _path(value: str) -> Path:
+    p = Path(value).expanduser().resolve()
+    if not p.exists():
+        raise ArgumentTypeError(f"{value} does not exist")
+    return p
+
+
+def _path_file(value: str) -> Path:
+    p = _path(value)
+    if not p.is_file():
+        raise ArgumentTypeError(f"{value} must be a file")
+    return p
+
+
+def _path_dir(value: str) -> Path:
+    p = _path(value)
+    if not p.is_dir():
+        raise ArgumentTypeError(f"{value} must be a directory")
+    return p
+
+
+def _int_positive(value: str) -> int:
+    i = int(value)
+    if i <= 0:
+        raise ArgumentTypeError(f"{value} must be greater than 0")
+    return i
+
+
+def _int_nonnegative(value: str) -> int:
+    i = int(value)
+    if i < 0:
+        raise ArgumentTypeError(f"{value} must not be negative")
+    return i
+
+
+def create_arg_parser() -> ArgumentParser:
+    parser = ArgumentParser()
     group_global = parser.add_argument_group("global settings")
     group_source = group_global.add_mutually_exclusive_group()
     group_source.add_argument(
         "-m",
-        type=str,
+        type=_path_file,
         metavar="filename",
         help="GGUF model file",
     )
     group_source.add_argument(
         "-md",
         "--models-dir",
-        type=str,
+        type=_path_dir,
         metavar="directory",
         help="directory containing GGUF models",
         dest="md",
@@ -53,19 +88,19 @@ def create_arg_parser() -> argparse.ArgumentParser:
     )
     group_global.add_argument(
         "-c",
-        type=int,
+        type=_int_positive,
         metavar="context",
         help="desired context length, default: model max",
     )
     group_global.add_argument(
         "-b",
-        type=int,
+        type=_int_positive,
         metavar="batch-size",
         help="batch size",
     )
     group_global.add_argument(
         "-ub",
-        type=int,
+        type=_int_positive,
         metavar="ubatch-size",
         help="microbatch size",
     )
@@ -78,7 +113,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
     )
     group_global.add_argument(
         "--llama-cpp-path",
-        type=str,
+        type=_path_dir,
         metavar="path",
         help="path to llama.cpp binaries",
         dest="llama_path",
@@ -88,13 +123,13 @@ def create_arg_parser() -> argparse.ArgumentParser:
     )
     group_test.add_argument(
         "-t",
-        type=int,
+        type=_int_positive,
         metavar="threads",
         help="number of threads for CPU inference",
     )
     group_test.add_argument(
         "-ngl",
-        type=int,
+        type=_int_nonnegative,
         metavar="n-gpu-layers",
         help="number of layers offloaded to GPU",
     )
@@ -104,7 +139,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
 class ToolPathError(Exception):
     """Tool path not found"""
 
-def _get_tool_path(cmds: list[str], at: Path) -> Path:
+def _get_tool_path(cmds: list[str], at: Path | None) -> Path:
     for cmd in cmds:
         path = shutil.which(cmd, path=at)
         if path:
@@ -117,39 +152,28 @@ def load_config() -> AppConfig:
     args = parser.parse_args()
 
     try:
-        llama_path = Path(args.llama_path).expanduser().resolve()
-        llama_bench = _get_tool_path(["llama-bench"], llama_path)
-        llama_cli = _get_tool_path(["llama-completion", "llama-cli"], llama_path)
+        llama_bench = _get_tool_path(["llama-bench"], args.llama_path)
+        llama_cli = _get_tool_path(["llama-completion", "llama-cli"], args.llama_path)
     except ToolPathError as e:
         parser.error(str(e))
 
-    src_f: str | None = args.m
-    src_d: str | None = args.md
+    src_f: Path | None = args.m
+    src_d: Path | None = args.md
 
     if not (bool(src_f) ^ bool(src_d)):
         parser.error("Provide either -m <file> or -md <directory>")
 
     files: list[Path] = []
     if src_f:
-        f = Path(src_f).expanduser().resolve()
-        if not f.exists():
-            parser.error(f"{f} does not exist.")
-        if f.is_dir():
-            parser.error(f"{f} is a directory, use -md.")
-        files.append(f)
+        files.append(src_f)
     if src_d:
-        d = Path(src_d).expanduser().resolve()
-        if not d.exists():
-            parser.error(f"{d} does not exist.")
-        if not d.is_dir():
-            parser.error(f"{d} is not a directory, use -m.")
         gguf_files = [
             f.resolve()
-            for f in d.iterdir()
+            for f in src_d.iterdir()
             if f.is_file() and f.suffix.lower() == ".gguf"
         ]
         if not gguf_files:
-            parser.error(f"{d} has no .gguf files.")
+            parser.error(f"{src_d} has no .gguf files.")
         files.extend(gguf_files)
 
     return AppConfig(
