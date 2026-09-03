@@ -1,5 +1,6 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from shlex import quote
 from typing import Literal
 
 Quant = Literal["f16", "q8_0", "q4_0"]
@@ -18,7 +19,7 @@ class ModelParams:
     ub: int = 512
 
     def to_cli(self, binary: str = "llama-server") -> str:
-        options = [f" -{k} {v}" for k, v in asdict(self).items()]
+        options = [f" -{k} {quote(str(v))}" for k, v in asdict(self).items()]
         return binary + "".join(options) + "\n"
     
     def to_cli_list(self, binary: str = "llama-server", options_exclude: tuple[str, ...] = ()) -> list[str]:
