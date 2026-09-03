@@ -104,7 +104,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
 class ToolPathError(Exception):
     """Tool path not found"""
 
-def _get_tool_path(cmds: list[str], at: str) -> Path:
+def _get_tool_path(cmds: list[str], at: Path) -> Path:
     for cmd in cmds:
         path = shutil.which(cmd, path=at)
         if path:
@@ -117,8 +117,9 @@ def load_config() -> AppConfig:
     args = parser.parse_args()
 
     try:
-        llama_bench = _get_tool_path(["llama-bench"], args.llama_path)
-        llama_cli = _get_tool_path(["llama-completion", "llama-cli"], args.llama_path)
+        llama_path = Path(args.llama_path).expanduser().resolve()
+        llama_bench = _get_tool_path(["llama-bench"], llama_path)
+        llama_cli = _get_tool_path(["llama-completion", "llama-cli"], llama_path)
     except ToolPathError as e:
         parser.error(str(e))
 
@@ -130,15 +131,14 @@ def load_config() -> AppConfig:
 
     files: list[Path] = []
     if src_f:
-        f = Path(src_f)
+        f = Path(src_f).expanduser().resolve()
         if not f.exists():
             parser.error(f"{f} does not exist.")
         if f.is_dir():
             parser.error(f"{f} is a directory, use -md.")
-        abs_f = f.resolve()
-        files.append(abs_f)
+        files.append(f)
     if src_d:
-        d = Path(src_d)
+        d = Path(src_d).expanduser().resolve()
         if not d.exists():
             parser.error(f"{d} does not exist.")
         if not d.is_dir():
