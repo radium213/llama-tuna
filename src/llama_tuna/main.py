@@ -142,6 +142,10 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
             except OptimizeFailure as e:
                 logger.error(e)
                 continue
+        else:
+            if params.ngl > ngl_max:
+                logger.warning(f"Specified gpu layers {params.ngl} will not fit in VRAM, clamping to {ngl_max}")
+            params.ngl = min(params.ngl, ngl_max)
 
         if config.out_format == "cli":
             output.write(params.to_cli())
