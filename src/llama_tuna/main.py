@@ -4,7 +4,6 @@ import os
 import sys
 from collections.abc import Iterable
 from dataclasses import replace
-from functools import cache
 from typing import Literal
 
 from tqdm import tqdm
@@ -63,8 +62,6 @@ def optimize[T](
 
     def run(v: T) -> float:
         return runner(replace(fixed_params, **{param: v}))
-    
-    func = cache(run)
 
     def on_progress(i: int, n: int) -> None:
         tq.n = i
@@ -73,9 +70,9 @@ def optimize[T](
     
     try:
         if strat == "grid" or strat == "auto" and len(values) <= 3:
-            v = grid_search(func, values, on_progress)
+            v = grid_search(run, values, on_progress)
         else:
-            v = fibonacci_search(func, values, on_progress)
+            v = fibonacci_search(run, values, on_progress)
         tq.desc = f"[{param:>3}={v:>3}]"
     finally:
         tq.close()

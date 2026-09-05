@@ -5,6 +5,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from contextlib import suppress
+from functools import cache
 
 from llama_tuna.schema import ModelParams
 
@@ -96,51 +97,66 @@ def fibonacci_search[T](
     values: list[T],
     progress_callback: Callable[[int, int], None] = lambda a, b: None,
 ) -> T:
-    if not values:
-        raise OptimizeFailure("Empty search space")
+    func = cache(func)
     length = len(values)
-    fib: tuple[int, int, int] = (1, 1, 0)
-    k = 2
+    if length == 0:
+        raise OptimizeFailure("Empty search space")
+    if length == 1:
+        progress_callback(0, 1)
+        f = func(values[0])
+        progress_callback(1, 1)
+        if f == math.inf:
+            raise OptimizeFailure("All parameter values fail")
+        return values[0]
 
-    while fib[0] < length - 1:
+    fib: tuple[int, int, int] = (1, 0, 0)
+    k = 1
+    while fib[0] < length:
         k += 1
         fib = (fib[0] + fib[1], fib[0], fib[1])
-    k_max = k
+    it_max = k - 1
+    it = 0
 
     def get_section(i: int) -> int:
         return round(low + fib[i] / fib[0] * (high - low))
 
-    def evaluate(i: int, k: int) -> tuple[float, int]:
+    def evaluate(i: int) -> float:
+        nonlocal it
         f = func(values[i])
-        progress_callback(k_max - k + 1, k_max - 1)
-        return f, k - 1
+        it += 1
+        progress_callback(it, it_max)
+        return f
 
-    progress_callback(0, k_max - 1)
+    progress_callback(0, it_max)
 
     low = 0
     high = length - 1
+
     a = get_section(2)
     b = get_section(1)
     if a == b:
-        a -= 1
+        if a > low:
+            a -= 1
+        elif b < high:
+            b += 1
+    f_a = evaluate(a)
+    f_b = evaluate(b)
 
-    f_a, k = evaluate(a, k)
-    f_b, k = evaluate(b, k)
-
-    while k > 1:
+    while k > 3:
         if f_a <= f_b:
             high, b, f_b = b, a, f_a
             a = get_section(2)
             if a == b and a > low:
                 a -= 1
-            f_a, k = evaluate(a, k)
+            f_a = evaluate(a)
         else:
             low, a, f_a = a, b, f_b
             b = get_section(1)
             if a == b and b < high:
                 b += 1
-            f_b, k = evaluate(b, k)
+            f_b = evaluate(b)
         fib = (fib[1], fib[2], fib[1] - fib[2])
+        k -= 1
 
     if f_a == math.inf and f_b == math.inf:
         raise OptimizeFailure("All parameter values fail")
