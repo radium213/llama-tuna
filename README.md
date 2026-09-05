@@ -67,10 +67,10 @@ c = 16384
 ## CLI Reference
 
 ```text
-usage: llama-tuna [-h] [-m filename | -md directory] [-fa {on,off}]
-                  [-ctk {f16,q8_0,q4_0}] [-ctv {f16,q8_0,q4_0}] [-c context]
-                  [-b batch-size] [-ub ubatch-size] [-o {cli,ini}]
-                  [--llama-bench path] [-t threads] [-ngl n-gpu-layers]
+usage: llama-tuna [-h] [-m filename | -md directory]
+                  [-fa {on,off}] [-ctk {f16,q8_0,q4_0}] [-ctv {f16,q8_0,q4_0}]
+                  [-c context] [-b batch-size] [-ub ubatch-size] [-o {cli,ini}]
+                  [--llama-cpp-path path] [-t threads] [-ngl n-gpu-layers]
 
 options:
   -h, --help            show this help message and exit

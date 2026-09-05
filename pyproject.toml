@@ -5,8 +5,17 @@ description = "Local LLM inference optimizer for llama-server"
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
+authors = [{ name = "radium213", email = "radium213@gmail.com" }]
+keywords = ["llm", "gguf", "llama.cpp", "benchmark", "inference", "optimizer"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Windows",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 requires-python = ">=3.12"
 dependencies = [
