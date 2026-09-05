@@ -91,7 +91,7 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
         try:
             with open(file, "rb") as fb:
                 metadata = read_gguf_metadata(fb)
-        except GGUFParsingError as e:
+        except (GGUFParsingError, OSError) as e:
             logger.error(e)
             continue
         if not metadata.architecture or metadata.architecture in [
