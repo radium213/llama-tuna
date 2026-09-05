@@ -23,5 +23,10 @@ Issues = "https://github.com/radium213/llama-tuna/issues"
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
 [project.scripts]
 llama-tuna = "llama_tuna.main:main"

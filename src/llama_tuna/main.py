@@ -89,7 +89,8 @@ def main_loop(config: AppConfig, output: io.TextIOBase, logger: logging.Logger):
     for i_file, file in enumerate(files_sorted, 1):
         logger.info(f"[{i_file:>3}/{n_files:>3}] {file.name}")
         try:
-            metadata = read_gguf_metadata(file)
+            with open(file, "rb") as fb:
+                metadata = read_gguf_metadata(fb)
         except GGUFParsingError as e:
             logger.error(e)
             continue

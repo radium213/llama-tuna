@@ -1,7 +1,6 @@
 import io
 import struct
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 SUPPORTED_VERSIONS = [2, 3]
@@ -90,26 +89,25 @@ def _read_header(f: io.BufferedReader) -> tuple[int, int, int]:
     return version, tensor_count, metadata_kv_count
 
 
-def _read_metadata(path: str | Path) -> tuple[dict[str, ValueType], int, int]:
-    with open(path, "rb") as f:
-        try:
-            header = _read_header(f)
-            [version, tensor_count, metadata_kv_count] = header
-            if version not in SUPPORTED_VERSIONS:
-                raise IncompatibleVersion(
-                    f"Expected GGUF version: {SUPPORTED_VERSIONS}, but got {version}"
-                )
-            metadata: dict[str, ValueType] = {}
-            for _ in range(metadata_kv_count):
-                key, value = _read_kv(f)
-                metadata[key] = value
-            return metadata, version, tensor_count
-        except (struct.error, UnicodeDecodeError) as e:
-            raise StructuralError("File structure is invalid") from e
+def _read_metadata(f: io.BufferedReader) -> tuple[dict[str, ValueType], int, int]:
+    try:
+        header = _read_header(f)
+        [version, tensor_count, metadata_kv_count] = header
+        if version not in SUPPORTED_VERSIONS:
+            raise IncompatibleVersion(
+                f"Expected GGUF version: {SUPPORTED_VERSIONS}, but got {version}"
+            )
+        metadata: dict[str, ValueType] = {}
+        for _ in range(metadata_kv_count):
+            key, value = _read_kv(f)
+            metadata[key] = value
+        return metadata, version, tensor_count
+    except (struct.error, UnicodeDecodeError) as e:
+        raise StructuralError("File structure is invalid") from e
 
 
-def read_gguf_metadata(path: str | Path) -> GGUFMetadata:
-    gguf_meta, gguf_version, tensor_count = _read_metadata(path)
+def read_gguf_metadata(file: io.BufferedReader) -> GGUFMetadata:
+    gguf_meta, gguf_version, tensor_count = _read_metadata(file)
     architecture = gguf_meta.get("general.architecture", "")
     name = gguf_meta.get("general.name", "")
     size_label = gguf_meta.get("general.size_label", "")
