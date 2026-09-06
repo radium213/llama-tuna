@@ -56,13 +56,18 @@ class BenchRunner:
 
         def get_results(rows: list[dict[str, str]], filter: str) -> float:
             r = [row for row in rows if int(row[filter]) > 0]
+            if not r:
+                return math.inf
             sum_ns = sum([int(row["avg_ns"]) for row in r])
             return sum_ns / 1e9
 
-        data: list[dict[str, str]] = list(csv.DictReader(io.StringIO(result.stdout)))
-        pp_s = get_results(data, "n_prompt")
-        tg_s = get_results(data, "n_gen")
-        return pp_s + tg_s
+        try:
+            data: list[dict[str, str]] = list(csv.DictReader(io.StringIO(result.stdout)))
+            pp_s = get_results(data, "n_prompt")
+            tg_s = get_results(data, "n_gen")
+            return pp_s + tg_s
+        except (KeyError, ValueError, csv.Error):
+            return math.inf
 
 
 class CliRunner:
